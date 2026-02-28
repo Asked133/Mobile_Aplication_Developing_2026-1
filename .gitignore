@@ -29,11 +29,18 @@ Thumbs.db
 **/android/**/release/
 
 # iOS / macOS generados
+**/ios/Pods/
+**/ios/.symlinks/
 **/ios/Flutter/.last_build_id
 **/ios/Flutter/ephemeral/
 **/ios/Flutter/Generated.xcconfig
 **/ios/Flutter/flutter_export_environment.sh
+**/macos/Pods/
 **/macos/Flutter/ephemeral/
+
+# Linux / Windows Flutter ephemeral
+**/linux/flutter/ephemeral/
+**/windows/flutter/ephemeral/
 
 # Símbolos / mapas de ofuscación
 **/app.*.symbols
