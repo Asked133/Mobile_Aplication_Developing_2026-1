@@ -5,6 +5,7 @@ class CardWidget extends StatelessWidget {
   final String categoria;
   final int cantidad;
   final IconData icono;
+  final VoidCallback? onTap;
 
   const CardWidget({
     super.key,
@@ -12,6 +13,7 @@ class CardWidget extends StatelessWidget {
     required this.categoria,
     required this.cantidad,
     required this.icono,
+    this.onTap,
   });
 
   @override
@@ -34,12 +36,9 @@ class CardWidget extends StatelessWidget {
           nombre,
           style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
         ),
-        subtitle: Text('Categoría: $categoria'),
-        trailing: Text(
-          'Cant: $cantidad',
-          style: const TextStyle(fontWeight: FontWeight.bold),
-        ),
+        onTap: onTap,
       ),
+      
     );
   }
 }
