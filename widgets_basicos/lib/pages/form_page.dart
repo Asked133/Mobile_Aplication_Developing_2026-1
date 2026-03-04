@@ -86,7 +86,7 @@ class _FormPageState extends State<FormPage> {
                   });
                 },
               ),
-              SizedBox(height: 60,),
+              SizedBox(height: 20,),
               ElevatedButton(
                 style: ElevatedButton.styleFrom(
                   backgroundColor: Colors.pinkAccent

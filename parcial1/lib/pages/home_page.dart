@@ -1,22 +1,62 @@
 import 'package:flutter/material.dart';
+import 'package:parcial1/widgets/card_widget.dart';
 
-void main() => runApp(const MyApp());
+//dashboard de inicio. Muestra la lista de compras y un boton para agregar nuevos productos.
+class HomePage extends StatelessWidget {
+  HomePage({super.key});
 
-class MyApp extends StatelessWidget {
-  const MyApp({super.key});
+  final List<Map<String, dynamic>> compras = [
+      {'nombre': 'Manzanas', 'categoria': 'Frutas', 'cantidad': 5, 'icono': Icons.apple},
+      {'nombre': 'Leche Deslactosada', 'categoria': 'Lácteos', 'cantidad': 2, 'icono': Icons.local_drink},
+      {'nombre': 'Detergente', 'categoria': 'Limpieza', 'cantidad': 1, 'icono': Icons.clean_hands},
+      {'nombre': 'Pan Integral', 'categoria': 'Panadería', 'cantidad': 3, 'icono': Icons.bakery_dining},
+      {'nombre': 'Huevos', 'categoria': 'Lácteos', 'cantidad': 12, 'icono': Icons.egg},
+    ];
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Material App',
-      home: Scaffold(
-        appBar: AppBar(
-          title: const Text('Material App Bar'),
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text(
+          'Lista de Compras',
+          style: TextStyle(
+            color: Colors.white,
+            fontSize: 23,
+            fontWeight: FontWeight.w500,
+          ),
         ),
-        body: const Center(
-          child: Text('Hello World'),
-        ),
+        backgroundColor: Colors.indigo,
+        leading: const Icon(Icons.shopping_cart, color: Colors.white),
       ),
+      body: ListView.builder(
+        padding: const EdgeInsets.all(16),
+        itemCount: compras.length,
+        itemBuilder: (context, index) {
+          final item = compras[index];
+          //widget de tarjeta personalizada (apartado en seccion de widgets).
+          return CardWidget(
+            nombre: item['nombre'],
+            categoria: item['categoria'],
+            cantidad: item['cantidad'],
+            icono: item['icono'],
+          );
+        },
+      ),
+
+      //boton para agregar productos (cambia a pagina de fdormulario).
+      floatingActionButton: FloatingActionButton(
+          backgroundColor: Colors.indigo,
+          elevation:  10,
+          onPressed: () {
+            Navigator.pushNamed(context, '/form');
+          },
+          child: const Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(Icons.add, color: Colors.white),
+            ],
+          ),
+        ),
     );
   }
 }
