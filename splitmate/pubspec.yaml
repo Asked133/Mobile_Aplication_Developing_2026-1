@@ -1,0 +1,41 @@
+name: splitmate
+description: App para dividir gastos entre grupos de amigos
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.11.1
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.8
+
+  # Firebase
+  firebase_core: ^3.13.0
+  firebase_auth: ^5.6.0
+  cloud_firestore: ^5.6.6
+  firebase_messaging: ^15.2.5
+
+  # Notificaciones locales
+  flutter_local_notifications: ^18.0.1
+
+  # Formato de números y fechas
+  intl: ^0.20.2
+
+  # Google Sign In
+  google_sign_in: ^6.3.0
+
+  # Localización en español
+  flutter_localizations:
+    sdk: flutter
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/
