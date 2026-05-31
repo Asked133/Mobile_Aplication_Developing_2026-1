@@ -3,6 +3,7 @@
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
+import 'firebase_options.dart';
 
 import 'pages/login_page.dart';
 import 'pages/registro_page.dart';
@@ -21,13 +22,9 @@ import 'utils/constantes.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // intenta inicializar Firebase — si falla, la app sigue con mock data
-  try {
-    await Firebase.initializeApp();
-    await NotificacionService.instance.inicializar();
-  } catch (e) {
-    debugPrint('⚠️ Firebase no configurado, usando MockData: $e');
-  }
+  // inicializa Firebase con la configuración del proyecto
+  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+  await NotificacionService.instance.inicializar();
 
   runApp(const SplitMateApp());
 }

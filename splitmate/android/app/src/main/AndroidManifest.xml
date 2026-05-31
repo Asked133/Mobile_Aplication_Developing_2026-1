@@ -1,4 +1,6 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- permiso de internet necesario para Firebase en el APK release -->
+    <uses-permission android:name="android.permission.INTERNET"/>
     <application
         android:label="splitmate"
         android:name="${applicationName}"
