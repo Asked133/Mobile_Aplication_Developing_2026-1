@@ -2,8 +2,9 @@
 // timeline de actividad de todos los grupos del usuario con filtros
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
-import '../data/mock_data.dart';
 import '../models/actividad.dart';
+import '../models/usuario.dart';
+import '../models/grupo.dart';
 import '../services/firebase_service.dart';
 
 class ActividadPage extends StatefulWidget {
@@ -28,21 +29,6 @@ class _ActividadPageState extends State<ActividadPage> {
 
   @override
   Widget build(BuildContext context) {
-    // obtiene todas las actividades de todos los grupos del usuario
-    final misGrupos = MockData.grupos.where((g) => g.esMiembro(_uid)).toList();
-    List<Actividad> todasActividades = [];
-    for (final grupo in misGrupos) {
-      todasActividades.addAll(MockData.actividadesDeGrupo(grupo.id));
-    }
-
-    // ordena por fecha (más reciente primero)
-    todasActividades.sort((a, b) => b.creadoEn.compareTo(a.creadoEn));
-
-    // aplica filtro si no es "todos"
-    final actividadesFiltradas = _filtro == 'todos'
-        ? todasActividades
-        : todasActividades.where((a) => a.tipo == _filtro).toList();
-
     return Scaffold(
       appBar: AppBar(title: const Text('Actividad')),
       body: Column(
@@ -71,8 +57,22 @@ class _ActividadPageState extends State<ActividadPage> {
 
           // lista de actividades o estado vacío
           Expanded(
-            child: actividadesFiltradas.isEmpty
-                ? const Center(
+            child: FutureBuilder<List<Actividad>>(
+              future: FirebaseService.instance.obtenerActividadUsuario(_uid),
+              builder: (context, snapshot) {
+                if (snapshot.connectionState == ConnectionState.waiting) {
+                  return const Center(child: CircularProgressIndicator());
+                }
+
+                final todasActividades = snapshot.data ?? [];
+                
+                // aplica filtro si no es "todos"
+                final actividadesFiltradas = _filtro == 'todos'
+                    ? todasActividades
+                    : todasActividades.where((a) => a.tipo == _filtro).toList();
+
+                if (actividadesFiltradas.isEmpty) {
+                  return const Center(
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
@@ -82,41 +82,52 @@ class _ActividadPageState extends State<ActividadPage> {
                             style: TextStyle(color: Colors.grey, fontSize: 16)),
                       ],
                     ),
-                  )
-                : ListView.separated(
-                    padding: const EdgeInsets.symmetric(horizontal: 12),
-                    itemCount: actividadesFiltradas.length,
-                    separatorBuilder: (context2, i) => const Divider(height: 1),
-                    itemBuilder: (context, index) {
-                      final act = actividadesFiltradas[index];
-                      final actor = MockData.buscarUsuario(act.actorUid);
-                      final grupo = MockData.grupos
-                          .where((g) => g.id == act.grupoId)
-                          .firstOrNull;
-                      final dateFormatter = DateFormat('dd/MM HH:mm');
+                  );
+                }
 
-                      return ListTile(
-                        leading: CircleAvatar(
-                          backgroundColor: Colors.grey.shade100,
-                          child: Text(act.emoji,
-                              style: const TextStyle(fontSize: 22)),
-                        ),
-                        title: Text(act.descripcion,
-                            style: const TextStyle(fontSize: 14)),
-                        subtitle: Text(
-                          '${actor?.nombre ?? 'Alguien'} • ${grupo?.nombre ?? ''} • ${dateFormatter.format(act.creadoEn)}',
-                          style: const TextStyle(fontSize: 11, color: Colors.grey),
-                        ),
-                        trailing: act.monto != null
-                            ? Text(
-                                '\$${act.monto!.toStringAsFixed(2)}',
-                                style: const TextStyle(
-                                    fontWeight: FontWeight.bold, fontSize: 13),
-                              )
-                            : null,
-                      );
-                    },
-                  ),
+                return ListView.separated(
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  itemCount: actividadesFiltradas.length,
+                  separatorBuilder: (context, i) => const Divider(height: 1),
+                  itemBuilder: (context, index) {
+                    final act = actividadesFiltradas[index];
+                    final dateFormatter = DateFormat('dd/MM HH:mm');
+
+                    return FutureBuilder<List<dynamic>>(
+                      future: Future.wait([
+                        FirebaseService.instance.obtenerUsuarioCacheado(act.actorUid),
+                        FirebaseService.instance.obtenerGrupo(act.grupoId),
+                      ]),
+                      builder: (context, actSnapshot) {
+                        final actor = actSnapshot.data?.elementAtOrNull(0) as Usuario?;
+                        final grupo = actSnapshot.data?.elementAtOrNull(1) as Grupo?;
+                        
+                        return ListTile(
+                          leading: CircleAvatar(
+                            backgroundColor: Colors.grey.shade100,
+                            child: Text(act.emoji,
+                                style: const TextStyle(fontSize: 22)),
+                          ),
+                          title: Text(act.descripcion,
+                              style: const TextStyle(fontSize: 14)),
+                          subtitle: Text(
+                            '${actor?.nombre ?? 'Alguien'} • ${grupo?.nombre ?? ''} • ${dateFormatter.format(act.creadoEn)}',
+                            style: const TextStyle(fontSize: 11, color: Colors.grey),
+                          ),
+                          trailing: act.monto != null
+                              ? Text(
+                                  '\$${act.monto!.toStringAsFixed(2)}',
+                                  style: const TextStyle(
+                                      fontWeight: FontWeight.bold, fontSize: 13),
+                                )
+                              : null,
+                        );
+                      },
+                    );
+                  },
+                );
+              },
+            ),
           ),
         ],
       ),

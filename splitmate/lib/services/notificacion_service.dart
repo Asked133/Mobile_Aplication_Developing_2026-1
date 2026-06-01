@@ -2,6 +2,7 @@
 // maneja notificaciones push (FCM) y locales
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'firebase_service.dart';
 
 // handler para mensajes en background (debe ser función de nivel superior)
@@ -13,7 +14,7 @@ class NotificacionService {
   static final NotificacionService instance = NotificacionService._();
   NotificacionService._();
 
-  final _fcm   = FirebaseMessaging.instance;
+  final _fcm = FirebaseMessaging.instance;
   final _local = FlutterLocalNotificationsPlugin();
 
   // canal de notificaciones para Android
@@ -26,6 +27,8 @@ class NotificacionService {
 
   // inicializa FCM + notificaciones locales
   Future<void> inicializar() async {
+    if (kIsWeb) return; // Las notificaciones no están configuradas para Web
+
     // solicitar permiso en iOS
     await _fcm.requestPermission(alert: true, badge: true, sound: true);
 
@@ -33,7 +36,9 @@ class NotificacionService {
     FirebaseMessaging.onBackgroundMessage(_handlerBackground);
 
     // configurar notificaciones locales
-    const androidSettings = AndroidInitializationSettings('@mipmap/ic_launcher');
+    const androidSettings = AndroidInitializationSettings(
+      '@mipmap/ic_launcher',
+    );
     const iosSettings = DarwinInitializationSettings();
     await _local.initialize(
       const InitializationSettings(android: androidSettings, iOS: iosSettings),
@@ -41,7 +46,9 @@ class NotificacionService {
 
     // crear canal en Android
     await _local
-        .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
+        .resolvePlatformSpecificImplementation<
+          AndroidFlutterLocalNotificationsPlugin
+        >()
         ?.createNotificationChannel(_channel);
 
     // escuchar mensajes mientras la app está abierta (foreground)
@@ -54,7 +61,8 @@ class NotificacionService {
         notif.body,
         NotificationDetails(
           android: AndroidNotificationDetails(
-            _channel.id, _channel.name,
+            _channel.id,
+            _channel.name,
             channelDescription: _channel.description,
             importance: Importance.high,
             priority: Priority.high,
@@ -81,7 +89,8 @@ class NotificacionService {
       cuerpo,
       NotificationDetails(
         android: AndroidNotificationDetails(
-          _channel.id, _channel.name,
+          _channel.id,
+          _channel.name,
           importance: Importance.high,
           priority: Priority.high,
         ),

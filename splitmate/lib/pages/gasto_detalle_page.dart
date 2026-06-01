@@ -2,8 +2,8 @@
 // vista de detalle de un gasto con opción de eliminar
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
-import '../data/mock_data.dart';
 import '../models/gasto.dart';
+import '../models/usuario.dart';
 import '../services/firebase_service.dart';
 import '../widgets/avatar_iniciales_widget.dart';
 
@@ -17,9 +17,6 @@ class GastoDetallePage extends StatelessWidget {
     final uid = FirebaseService.instance.usuarioActual?.uid ?? 'user1';
     final formatter = NumberFormat.currency(symbol: '\$', decimalDigits: 2);
     final dateFormatter = DateFormat('dd MMMM yyyy', 'es');
-
-    // busca datos del que pagó
-    final quienPago = MockData.buscarUsuario(gasto.pagadoPor);
 
     // busca emoji de la categoría
     final categoria = kCategorias.firstWhere(
@@ -81,16 +78,22 @@ class GastoDetallePage extends StatelessWidget {
             // tarjeta: quién pagó
             Card(
               color: Colors.white,
-              child: ListTile(
-                leading: AvatarInicialesWidget(
-                  nombre: quienPago?.nombre ?? '?',
-                  radio: 22,
-                ),
-                title: const Text('Pagado por', style: TextStyle(fontSize: 12, color: Colors.grey)),
-                subtitle: Text(
-                  quienPago?.nombre ?? 'Alguien',
-                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                ),
+              child: FutureBuilder<Usuario?>(
+                future: FirebaseService.instance.obtenerUsuarioCacheado(gasto.pagadoPor),
+                builder: (context, snapshot) {
+                  final quienPago = snapshot.data;
+                  return ListTile(
+                    leading: AvatarInicialesWidget(
+                      nombre: quienPago?.nombre ?? '?',
+                      radio: 22,
+                    ),
+                    title: const Text('Pagado por', style: TextStyle(fontSize: 12, color: Colors.grey)),
+                    subtitle: Text(
+                      quienPago?.nombre ?? 'Alguien',
+                      style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                    ),
+                  );
+                },
               ),
             ),
             const SizedBox(height: 8),
@@ -108,26 +111,31 @@ class GastoDetallePage extends StatelessWidget {
                     const SizedBox(height: 8),
                     // lista de cada persona y cuánto debe
                     ...gasto.divididoEntre.map((div) {
-                      final usuario = MockData.buscarUsuario(div.uid);
-                      return Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 4),
-                        child: Row(
-                          children: [
-                            AvatarInicialesWidget(
-                              nombre: usuario?.nombre ?? '?',
-                              radio: 14,
+                      return FutureBuilder<Usuario?>(
+                        future: FirebaseService.instance.obtenerUsuarioCacheado(div.uid),
+                        builder: (context, snapshot) {
+                          final usuario = snapshot.data;
+                          return Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 4),
+                            child: Row(
+                              children: [
+                                AvatarInicialesWidget(
+                                  nombre: usuario?.nombre ?? '?',
+                                  radio: 14,
+                                ),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: Text(usuario?.nombre ?? 'Desconocido',
+                                      style: const TextStyle(fontSize: 14)),
+                                ),
+                                Text(
+                                  formatter.format(div.monto),
+                                  style: const TextStyle(fontWeight: FontWeight.bold),
+                                ),
+                              ],
                             ),
-                            const SizedBox(width: 10),
-                            Expanded(
-                              child: Text(usuario?.nombre ?? 'Desconocido',
-                                  style: const TextStyle(fontSize: 14)),
-                            ),
-                            Text(
-                              formatter.format(div.monto),
-                              style: const TextStyle(fontWeight: FontWeight.bold),
-                            ),
-                          ],
-                        ),
+                          );
+                        },
                       );
                     }),
                   ],

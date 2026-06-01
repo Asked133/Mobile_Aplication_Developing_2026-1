@@ -1,6 +1,7 @@
 // modelo de balance — representa una deuda entre dos personas
 // y calculadora que simplifica las deudas de un grupo
 import 'gasto.dart';
+import 'saldo.dart';
 
 // representa que 'deudorUid' le debe 'monto' a 'acreedorUid'
 class Balance {
@@ -17,13 +18,14 @@ class Balance {
   });
 }
 
-// calcula los balances simplificados a partir de los gastos del grupo
+// calcula los balances simplificados a partir de los gastos y saldos del grupo
 // usa un algoritmo greedy: empata acreedores con deudores para minimizar transacciones
 class CalculadorBalances {
-  static List<Balance> calcular(List<Gasto> gastos, {String? grupoId}) {
+  static List<Balance> calcular(List<Gasto> gastos, {List<Saldo> saldos = const [], String? grupoId}) {
     // mapa de balances netos: uid → (positivo = te deben, negativo = debes)
     final Map<String, double> netos = {};
 
+    // 1. sumar los gastos (quién pagó y quién usó)
     for (final gasto in gastos) {
       // el que pagó recibe el total
       netos[gasto.pagadoPor] = (netos[gasto.pagadoPor] ?? 0) + gasto.monto;
@@ -32,6 +34,15 @@ class CalculadorBalances {
       for (final division in gasto.divididoEntre) {
         netos[division.uid] = (netos[division.uid] ?? 0) - division.monto;
       }
+    }
+
+    // 2. aplicar los saldos (pagos ya realizados)
+    for (final saldo in saldos) {
+      // el deudor paga al acreedor
+      // el deudor reduce su deuda (se vuelve más positivo)
+      netos[saldo.deudorUid] = (netos[saldo.deudorUid] ?? 0) + saldo.monto;
+      // el acreedor recibe el pago (se vuelve más negativo, porque ya le deben menos)
+      netos[saldo.acreedorUid] = (netos[saldo.acreedorUid] ?? 0) - saldo.monto;
     }
 
     // separar acreedores (positivo) y deudores (negativo)

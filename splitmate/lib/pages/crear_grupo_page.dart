@@ -60,6 +60,7 @@ class _CrearGrupoPageState extends State<CrearGrupoPage> {
           : null,
       creadoPor: uid,
       moneda: _moneda,
+      emailsMiembros: _emailsAgregados,
     );
 
     setState(() => _cargando = false);
@@ -101,7 +102,8 @@ class _CrearGrupoPageState extends State<CrearGrupoPage> {
                   hintText: 'Ej: Depa, Viaje, Cena...',
                 ),
                 validator: (value) {
-                  if (value == null || value.trim().isEmpty) return 'El nombre es requerido';
+                  if (value == null || value.trim().isEmpty)
+                    return 'El nombre es requerido';
                   if (value.trim().length < 3) return 'Mínimo 3 caracteres';
                   return null;
                 },
@@ -127,17 +129,28 @@ class _CrearGrupoPageState extends State<CrearGrupoPage> {
                   prefixIcon: Icon(Icons.attach_money),
                 ),
                 items: const [
-                  DropdownMenuItem(value: 'MXN', child: Text('🇲🇽 MXN — Peso mexicano')),
-                  DropdownMenuItem(value: 'USD', child: Text('🇺🇸 USD — Dólar')),
-                  DropdownMenuItem(value: 'EUR', child: Text('🇪🇺 EUR — Euro')),
+                  DropdownMenuItem(
+                    value: 'MXN',
+                    child: Text('🇲🇽 MXN — Peso mexicano'),
+                  ),
+                  DropdownMenuItem(
+                    value: 'USD',
+                    child: Text('🇺🇸 USD — Dólar'),
+                  ),
+                  DropdownMenuItem(
+                    value: 'EUR',
+                    child: Text('🇪🇺 EUR — Euro'),
+                  ),
                 ],
                 onChanged: (value) => setState(() => _moneda = value ?? 'MXN'),
               ),
               const SizedBox(height: 24),
 
               // sección de agregar miembros
-              const Text('Agregar miembros',
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+              const Text(
+                'Agregar miembros',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+              ),
               const SizedBox(height: 8),
               Row(
                 children: [
@@ -155,7 +168,9 @@ class _CrearGrupoPageState extends State<CrearGrupoPage> {
                   IconButton.filled(
                     onPressed: _agregarMiembro,
                     icon: const Icon(Icons.add),
-                    style: IconButton.styleFrom(backgroundColor: kColorPrimario),
+                    style: IconButton.styleFrom(
+                      backgroundColor: kColorPrimario,
+                    ),
                   ),
                 ],
               ),
@@ -191,12 +206,18 @@ class _CrearGrupoPageState extends State<CrearGrupoPage> {
                   onPressed: _cargando ? null : _crearGrupo,
                   icon: _cargando
                       ? const SizedBox(
-                          height: 20, width: 20,
+                          height: 20,
+                          width: 20,
                           child: CircularProgressIndicator(
-                            strokeWidth: 2, color: Colors.white),
+                            strokeWidth: 2,
+                            color: Colors.white,
+                          ),
                         )
                       : const Icon(Icons.check),
-                  label: const Text('Crear Grupo', style: TextStyle(fontSize: 16)),
+                  label: const Text(
+                    'Crear Grupo',
+                    style: TextStyle(fontSize: 16),
+                  ),
                 ),
               ),
             ],

@@ -1,7 +1,7 @@
 // lib/pages/perfil_page.dart
 // pantalla de perfil con avatar, estadísticas y opción de cerrar sesión
 import 'package:flutter/material.dart';
-import '../data/mock_data.dart';
+import '../models/grupo.dart';
 import '../services/firebase_service.dart';
 import '../utils/constantes.dart';
 import '../widgets/avatar_iniciales_widget.dart';
@@ -16,16 +16,11 @@ class _PerfilPageState extends State<PerfilPage> {
   final _uid = FirebaseService.instance.usuarioActual?.uid ?? 'user1';
   bool _notificacionesActivas = true;
 
-  // datos del usuario (mock o Firebase)
   String get _nombre =>
-      FirebaseService.instance.usuarioActual?.displayName ??
-      MockData.buscarUsuario(_uid)?.nombre ??
-      'Usuario';
+      FirebaseService.instance.usuarioActual?.displayName ?? 'Usuario';
 
   String get _email =>
-      FirebaseService.instance.usuarioActual?.email ??
-      MockData.buscarUsuario(_uid)?.email ??
-      '';
+      FirebaseService.instance.usuarioActual?.email ?? '';
 
   // muestra diálogo para cambiar nombre
   void _cambiarNombre() {
@@ -92,13 +87,6 @@ class _PerfilPageState extends State<PerfilPage> {
 
   @override
   Widget build(BuildContext context) {
-    // estadísticas del usuario
-    final misGrupos = MockData.grupos.where((g) => g.esMiembro(_uid)).toList();
-    int totalGastos = 0;
-    for (final grupo in misGrupos) {
-      totalGastos += MockData.gastosDeGrupo(grupo.id).length;
-    }
-
     return Scaffold(
       appBar: AppBar(title: const Text('Mi perfil')),
       body: SingleChildScrollView(
@@ -134,27 +122,35 @@ class _PerfilPageState extends State<PerfilPage> {
             const SizedBox(height: 16),
 
             // estadísticas
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text('Mis estadísticas',
-                      style: TextStyle(
-                          fontSize: 16, fontWeight: FontWeight.bold)),
-                  const SizedBox(height: 12),
-                  _estadisticaRow(
-                      Icons.group, '${misGrupos.length} grupos activos'),
-                  const SizedBox(height: 8),
-                  _estadisticaRow(
-                      Icons.receipt_long, '$totalGastos gastos registrados'),
-                ],
-              ),
+            StreamBuilder<List<Grupo>>(
+              stream: FirebaseService.instance.streamGruposUsuario(_uid),
+              builder: (context, snapshot) {
+                final grupos = snapshot.data ?? [];
+                return Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text('Mis estadísticas',
+                          style: TextStyle(
+                              fontSize: 16, fontWeight: FontWeight.bold)),
+                      const SizedBox(height: 12),
+                      _estadisticaRow(
+                          Icons.group, '${grupos.length} grupos activos'),
+                      const SizedBox(height: 8),
+                      // simplificamos omitiendo el total de gastos globales 
+                      // (evitamos llamadas a colecciones que no necesitamos)
+                      _estadisticaRow(
+                          Icons.receipt_long, 'Consulta gastos dentro de cada grupo'),
+                    ],
+                  ),
+                );
+              }
             ),
             const SizedBox(height: 16),
 

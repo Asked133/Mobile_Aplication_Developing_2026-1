@@ -4,16 +4,16 @@ import 'package:intl/intl.dart';
 import '../models/gasto.dart';
 import '../models/usuario.dart';
 
+import '../services/firebase_service.dart';
+
 class GastoCardWidget extends StatelessWidget {
   final Gasto gasto;
-  final Usuario? quienPago;
   final String uidActual;
   final VoidCallback onTap;
 
   const GastoCardWidget({
     super.key,
     required this.gasto,
-    required this.quienPago,
     required this.uidActual,
     required this.onTap,
   });
@@ -41,12 +41,18 @@ class GastoCardWidget extends StatelessWidget {
           child: Text(nombreCategoria['emoji'] as String, style: const TextStyle(fontSize: 20)),
         ),
         title: Text(gasto.descripcion),
-        // muestra quién pagó
-        subtitle: Text(
-          yoPague
-              ? 'Tú pagaste • ${formatter.format(gasto.monto)}'
-              : '${quienPago?.nombre ?? 'Alguien'} pagó • ${formatter.format(gasto.monto)}',
-          style: const TextStyle(fontSize: 12),
+        // muestra quién pagó usando FutureBuilder para obtener el nombre
+        subtitle: FutureBuilder<Usuario?>(
+          future: FirebaseService.instance.obtenerUsuarioCacheado(gasto.pagadoPor),
+          builder: (context, snapshot) {
+            final nombre = snapshot.data?.nombre ?? 'Alguien';
+            return Text(
+              yoPague
+                  ? 'Tú pagaste • ${formatter.format(gasto.monto)}'
+                  : '$nombre pagó • ${formatter.format(gasto.monto)}',
+              style: const TextStyle(fontSize: 12),
+            );
+          },
         ),
         // monto que te afecta: + si pagaste, - si debes
         trailing: Column(

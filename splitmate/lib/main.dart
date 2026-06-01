@@ -17,6 +17,7 @@ import 'pages/saldar_page.dart';
 import 'pages/actividad_page.dart';
 import 'pages/perfil_page.dart';
 import 'services/notificacion_service.dart';
+import 'services/firebase_service.dart';
 import 'utils/constantes.dart';
 
 void main() async {
@@ -77,8 +78,8 @@ class SplitMateApp extends StatelessWidget {
         ),
       ),
 
-      // ruta inicial
-      initialRoute: '/login',
+      // ruta inicial basada en si hay sesión activa
+      initialRoute: FirebaseService.instance.estaLogueado ? '/home' : '/login',
 
       // rutas nombradas para las 11 páginas
       routes: {

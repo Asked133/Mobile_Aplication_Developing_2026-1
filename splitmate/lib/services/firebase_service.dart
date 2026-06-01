@@ -7,6 +7,7 @@ import '../models/usuario.dart';
 import '../models/grupo.dart';
 import '../models/gasto.dart';
 import '../models/actividad.dart';
+import '../models/saldo.dart';
 
 class FirebaseService {
   // singleton igual que en parcial1
@@ -14,7 +15,10 @@ class FirebaseService {
   FirebaseService._();
 
   final _auth = FirebaseAuth.instance;
-  final _db   = FirebaseFirestore.instance;
+  final _db = FirebaseFirestore.instance;
+
+  // caché local de usuarios para evitar lecturas repetitivas a Firestore
+  final Map<String, Usuario> _usuariosCache = {};
 
   // ─── AUTH ─────────────────────────────────────────────────────────────────
 
@@ -30,7 +34,10 @@ class FirebaseService {
   // login con email y contraseña
   Future<String?> loginEmail(String email, String contrasena) async {
     try {
-      await _auth.signInWithEmailAndPassword(email: email, password: contrasena);
+      await _auth.signInWithEmailAndPassword(
+        email: email,
+        password: contrasena,
+      );
       return null; // null = éxito
     } on FirebaseAuthException catch (e) {
       return _mensajeError(e.code);
@@ -38,10 +45,15 @@ class FirebaseService {
   }
 
   // registro con email — crea cuenta en Auth y perfil en Firestore
-  Future<String?> registrarEmail(String nombre, String email, String contrasena) async {
+  Future<String?> registrarEmail(
+    String nombre,
+    String email,
+    String contrasena,
+  ) async {
     try {
       final cred = await _auth.createUserWithEmailAndPassword(
-        email: email, password: contrasena,
+        email: email,
+        password: contrasena,
       );
       // guarda el perfil en Firestore
       await _db.collection('usuarios').doc(cred.user!.uid).set({
@@ -61,7 +73,7 @@ class FirebaseService {
       final googleUser = await GoogleSignIn().signIn();
       if (googleUser == null) return 'Cancelado por el usuario';
       final gAuth = await googleUser.authentication;
-      final cred  = GoogleAuthProvider.credential(
+      final cred = GoogleAuthProvider.credential(
         accessToken: gAuth.accessToken,
         idToken: gAuth.idToken,
       );
@@ -71,7 +83,7 @@ class FirebaseService {
       if (!doc.exists) {
         await _db.collection('usuarios').doc(result.user!.uid).set({
           'nombre': result.user!.displayName ?? 'Sin nombre',
-          'email':  result.user!.email ?? '',
+          'email': result.user!.email ?? '',
           'fotoUrl': result.user!.photoURL,
           'creadoEn': FieldValue.serverTimestamp(),
         });
@@ -94,12 +106,21 @@ class FirebaseService {
   Future<Usuario?> obtenerUsuario(String uid) async {
     final doc = await _db.collection('usuarios').doc(uid).get();
     if (!doc.exists) return null;
-    return Usuario.fromMap(uid, doc.data()!);
+    final usuario = Usuario.fromMap(uid, doc.data()!);
+    _usuariosCache[uid] = usuario;
+    return usuario;
+  }
+
+  // obtiene el perfil de un usuario del caché o de Firestore si no existe
+  Future<Usuario?> obtenerUsuarioCacheado(String uid) async {
+    if (_usuariosCache.containsKey(uid)) return _usuariosCache[uid];
+    return await obtenerUsuario(uid);
   }
 
   // busca usuario por email (para agregar a grupo)
   Future<Usuario?> buscarPorEmail(String email) async {
-    final query = await _db.collection('usuarios')
+    final query = await _db
+        .collection('usuarios')
         .where('email', isEqualTo: email.trim().toLowerCase())
         .limit(1)
         .get();
@@ -123,23 +144,35 @@ class FirebaseService {
         .where('miembrosUid', arrayContains: uid)
         .orderBy('creadoEn', descending: true)
         .snapshots()
-        .map((snap) => snap.docs
-            .map((d) => Grupo.fromMap(d.id, d.data()))
-            .toList());
+        .map(
+          (snap) =>
+              snap.docs.map((d) => Grupo.fromMap(d.id, d.data())).toList(),
+        );
   }
 
-  // crea un nuevo grupo con el creador como primer miembro
+  // crea un nuevo grupo con el creador como primer miembro y resuelve los emails a UIDs
   Future<String?> crearGrupo({
     required String nombre,
     String? descripcion,
     required String creadoPor,
     String moneda = 'MXN',
+    List<String> emailsMiembros = const [],
   }) async {
     try {
+      List<String> miembrosUid = [creadoPor];
+
+      // Busca a los usuarios por email y los agrega a la lista de UIDs si existen
+      for (final email in emailsMiembros) {
+        final usuario = await buscarPorEmail(email);
+        if (usuario != null && !miembrosUid.contains(usuario.uid)) {
+          miembrosUid.add(usuario.uid);
+        }
+      }
+
       await _db.collection('grupos').add({
         'nombre': nombre,
         'descripcion': descripcion,
-        'miembrosUid': [creadoPor],
+        'miembrosUid': miembrosUid,
         'creadoPor': creadoPor,
         'moneda': moneda,
         'creadoEn': FieldValue.serverTimestamp(),
@@ -180,9 +213,10 @@ class FirebaseService {
         .collection('gastos')
         .orderBy('fecha', descending: true)
         .snapshots()
-        .map((snap) => snap.docs
-            .map((d) => Gasto.fromMap(d.id, d.data()))
-            .toList());
+        .map(
+          (snap) =>
+              snap.docs.map((d) => Gasto.fromMap(d.id, d.data())).toList(),
+        );
   }
 
   // agrega un gasto al grupo y registra la actividad
@@ -198,7 +232,8 @@ class FirebaseService {
       await _registrarActividad(
         grupoId: gasto.grupoId,
         tipo: 'gasto_agregado',
-        descripcion: '${gasto.descripcion} — \$${gasto.monto.toStringAsFixed(2)}',
+        descripcion:
+            '${gasto.descripcion} — \$${gasto.monto.toStringAsFixed(2)}',
         monto: gasto.monto,
         actorUid: gasto.creadoPor,
       );
@@ -220,6 +255,20 @@ class FirebaseService {
 
   // ─── SALDOS ───────────────────────────────────────────────────────────────
 
+  // stream de los saldos (pagos) de un grupo
+  Stream<List<Saldo>> streamSaldosGrupo(String grupoId) {
+    return _db
+        .collection('grupos')
+        .doc(grupoId)
+        .collection('saldos')
+        .orderBy('saldadoEn', descending: true)
+        .snapshots()
+        .map(
+          (snap) =>
+              snap.docs.map((d) => Saldo.fromMap(d.id, d.data())).toList(),
+        );
+  }
+
   // registra que se saldó una deuda entre dos personas
   Future<String?> saldarDeuda({
     required String grupoId,
@@ -229,16 +278,12 @@ class FirebaseService {
     String? nota,
   }) async {
     try {
-      await _db
-          .collection('grupos')
-          .doc(grupoId)
-          .collection('saldos')
-          .add({
-        'deudorUid':   deudorUid,
+      await _db.collection('grupos').doc(grupoId).collection('saldos').add({
+        'deudorUid': deudorUid,
         'acreedorUid': acreedorUid,
-        'monto':       monto,
-        'nota':        nota,
-        'saldadoEn':   FieldValue.serverTimestamp(),
+        'monto': monto,
+        'nota': nota,
+        'saldadoEn': FieldValue.serverTimestamp(),
       });
       // registra la actividad del pago
       await _registrarActividad(
@@ -265,9 +310,35 @@ class FirebaseService {
         .orderBy('creadoEn', descending: true)
         .limit(30)
         .snapshots()
-        .map((snap) => snap.docs
-            .map((d) => Actividad.fromMap(d.id, d.data()))
-            .toList());
+        .map(
+          (snap) =>
+              snap.docs.map((d) => Actividad.fromMap(d.id, d.data())).toList(),
+        );
+  }
+
+  // obtiene la actividad reciente de todos los grupos del usuario
+  Future<List<Actividad>> obtenerActividadUsuario(String uid) async {
+    final gruposSnap = await _db
+        .collection('grupos')
+        .where('miembrosUid', arrayContains: uid)
+        .get();
+
+    List<Actividad> todasActividades = [];
+    for (var doc in gruposSnap.docs) {
+      final actSnap = await _db
+          .collection('grupos')
+          .doc(doc.id)
+          .collection('actividad')
+          .orderBy('creadoEn', descending: true)
+          .limit(20)
+          .get();
+      todasActividades.addAll(
+        actSnap.docs.map((d) => Actividad.fromMap(d.id, d.data())),
+      );
+    }
+
+    todasActividades.sort((a, b) => b.creadoEn.compareTo(a.creadoEn));
+    return todasActividades;
   }
 
   // registra una actividad internamente (no se llama desde fuera)
@@ -278,17 +349,13 @@ class FirebaseService {
     double? monto,
     required String actorUid,
   }) async {
-    await _db
-        .collection('grupos')
-        .doc(grupoId)
-        .collection('actividad')
-        .add({
-      'grupoId':     grupoId,
-      'tipo':        tipo,
+    await _db.collection('grupos').doc(grupoId).collection('actividad').add({
+      'grupoId': grupoId,
+      'tipo': tipo,
       'descripcion': descripcion,
-      'monto':       monto,
-      'actorUid':    actorUid,
-      'creadoEn':    FieldValue.serverTimestamp(),
+      'monto': monto,
+      'actorUid': actorUid,
+      'creadoEn': FieldValue.serverTimestamp(),
     });
   }
 
@@ -296,12 +363,12 @@ class FirebaseService {
 
   // traduce códigos de error de Firebase a mensajes amigables en español
   String _mensajeError(String code) => switch (code) {
-    'user-not-found'       => 'No existe una cuenta con ese email',
-    'wrong-password'       => 'Contraseña incorrecta',
+    'user-not-found' => 'No existe una cuenta con ese email',
+    'wrong-password' => 'Contraseña incorrecta',
     'email-already-in-use' => 'Ese email ya está registrado',
-    'weak-password'        => 'La contraseña debe tener al menos 6 caracteres',
-    'invalid-email'        => 'El email no es válido',
-    'invalid-credential'   => 'Email o contraseña incorrectos',
-    _                      => 'Error: $code',
+    'weak-password' => 'La contraseña debe tener al menos 6 caracteres',
+    'invalid-email' => 'El email no es válido',
+    'invalid-credential' => 'Email o contraseña incorrectos',
+    _ => 'Error: $code',
   };
 }

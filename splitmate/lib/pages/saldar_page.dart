@@ -2,8 +2,8 @@
 // pantalla para confirmar el pago de una deuda
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
-import '../data/mock_data.dart';
 import '../models/balance.dart';
+import '../models/usuario.dart';
 import '../services/firebase_service.dart';
 import '../utils/constantes.dart';
 import '../widgets/avatar_iniciales_widget.dart';
@@ -83,9 +83,6 @@ class _SaldarPageState extends State<SaldarPage> {
     final balance = args['balance'] as Balance;
     final formatter = NumberFormat.currency(symbol: '\$', decimalDigits: 2);
 
-    final deudor = MockData.buscarUsuario(balance.deudorUid);
-    final acreedor = MockData.buscarUsuario(balance.acreedorUid);
-
     return Scaffold(
       appBar: AppBar(title: const Text('Saldar deuda')),
       body: SingleChildScrollView(
@@ -102,41 +99,52 @@ class _SaldarPageState extends State<SaldarPage> {
                   color: Colors.white,
                   borderRadius: BorderRadius.circular(16),
                 ),
-                child: Column(
-                  children: [
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                child: FutureBuilder<List<Usuario?>>(
+                  future: Future.wait([
+                    FirebaseService.instance.obtenerUsuarioCacheado(balance.deudorUid),
+                    FirebaseService.instance.obtenerUsuarioCacheado(balance.acreedorUid),
+                  ]),
+                  builder: (context, snapshot) {
+                    final deudor = snapshot.data?.elementAtOrNull(0);
+                    final acreedor = snapshot.data?.elementAtOrNull(1);
+
+                    return Column(
                       children: [
-                        // deudor
-                        Column(
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                           children: [
-                            AvatarInicialesWidget(
-                                nombre: deudor?.nombre ?? '?', radio: 30),
-                            const SizedBox(height: 8),
-                            Text(deudor?.nombre ?? 'Tú',
-                                style: const TextStyle(fontWeight: FontWeight.bold)),
+                            // deudor
+                            Column(
+                              children: [
+                                AvatarInicialesWidget(
+                                    nombre: deudor?.nombre ?? '?', radio: 30),
+                                const SizedBox(height: 8),
+                                Text(deudor?.nombre ?? 'Tú',
+                                    style: const TextStyle(fontWeight: FontWeight.bold)),
+                              ],
+                            ),
+                            // flecha
+                            const Icon(Icons.arrow_forward, size: 28, color: Colors.grey),
+                            // acreedor
+                            Column(
+                              children: [
+                                AvatarInicialesWidget(
+                                    nombre: acreedor?.nombre ?? '?', radio: 30),
+                                const SizedBox(height: 8),
+                                Text(acreedor?.nombre ?? 'Alguien',
+                                    style: const TextStyle(fontWeight: FontWeight.bold)),
+                              ],
+                            ),
                           ],
                         ),
-                        // flecha
-                        const Icon(Icons.arrow_forward, size: 28, color: Colors.grey),
-                        // acreedor
-                        Column(
-                          children: [
-                            AvatarInicialesWidget(
-                                nombre: acreedor?.nombre ?? '?', radio: 30),
-                            const SizedBox(height: 8),
-                            Text(acreedor?.nombre ?? 'Alguien',
-                                style: const TextStyle(fontWeight: FontWeight.bold)),
-                          ],
+                        const SizedBox(height: 16),
+                        Text(
+                          formatter.format(balance.monto),
+                          style: const TextStyle(fontSize: 28, fontWeight: FontWeight.bold),
                         ),
                       ],
-                    ),
-                    const SizedBox(height: 16),
-                    Text(
-                      formatter.format(balance.monto),
-                      style: const TextStyle(fontSize: 28, fontWeight: FontWeight.bold),
-                    ),
-                  ],
+                    );
+                  },
                 ),
               ),
               const SizedBox(height: 20),

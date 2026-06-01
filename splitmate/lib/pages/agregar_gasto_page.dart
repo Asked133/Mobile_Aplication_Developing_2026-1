@@ -3,7 +3,7 @@
 // soporta 3 métodos de división: igual, exacto y porcentaje
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
-import '../data/mock_data.dart';
+import '../models/grupo.dart';
 import '../models/gasto.dart';
 import '../models/usuario.dart';
 import '../services/firebase_service.dart';
@@ -29,35 +29,36 @@ class _AgregarGastoPageState extends State<AgregarGastoPage> {
   String _categoriaSeleccionada = 'comida';
   MetodoSplit _metodoSplit = MetodoSplit.igual;
   bool _cargando = false;
+  bool _cargandoMiembros = true;
 
   // miembros del grupo con su estado de selección
-  late List<Usuario> _miembros;
-  late Map<String, bool> _miembrosSeleccionados;
-  late Map<String, TextEditingController> _montoPorMiembro;
-  late Map<String, TextEditingController> _porcentajePorMiembro;
+  List<Usuario> _miembros = [];
+  Map<String, bool> _miembrosSeleccionados = {};
+  Map<String, TextEditingController> _montoPorMiembro = {};
+  Map<String, TextEditingController> _porcentajePorMiembro = {};
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    // inicializa miembros basándose en el grupo
-    final grupoId = ModalRoute.of(context)!.settings.arguments as String;
-    final grupo = MockData.grupos.firstWhere(
-      (g) => g.id == grupoId,
-      orElse: () => MockData.grupos.first,
-    );
-
-    _miembros = grupo.miembrosUid
-        .map((uid) => MockData.buscarUsuario(uid))
-        .whereType<Usuario>()
-        .toList();
-
-    // por defecto el que pagó es el usuario actual
-    if (_pagadoPor.isEmpty) _pagadoPor = _uid;
-
-    // inicializa mapas de selección y controllers
-    _miembrosSeleccionados = {for (var m in _miembros) m.uid: true};
-    _montoPorMiembro = {for (var m in _miembros) m.uid: TextEditingController()};
-    _porcentajePorMiembro = {for (var m in _miembros) m.uid: TextEditingController()};
+    if (_cargandoMiembros) {
+      final grupo = ModalRoute.of(context)!.settings.arguments as Grupo;
+      
+      Future.wait(
+        grupo.miembrosUid.map((uid) => FirebaseService.instance.obtenerUsuarioCacheado(uid))
+      ).then((usuarios) {
+        if (!mounted) return;
+        setState(() {
+          _miembros = usuarios.whereType<Usuario>().toList();
+          if (_pagadoPor.isEmpty) _pagadoPor = _uid;
+          
+          _miembrosSeleccionados = {for (var m in _miembros) m.uid: true};
+          _montoPorMiembro = {for (var m in _miembros) m.uid: TextEditingController()};
+          _porcentajePorMiembro = {for (var m in _miembros) m.uid: TextEditingController()};
+          
+          _cargandoMiembros = false;
+        });
+      });
+    }
   }
 
   @override
@@ -119,7 +120,8 @@ class _AgregarGastoPageState extends State<AgregarGastoPage> {
   Future<void> _guardarGasto() async {
     if (!_formKey.currentState!.validate()) return;
 
-    final grupoId = ModalRoute.of(context)!.settings.arguments as String;
+    final grupo = ModalRoute.of(context)!.settings.arguments as Grupo;
+    final grupoId = grupo.id;
     final monto = double.tryParse(
         _montoController.text.replaceAll(',', '.')) ?? 0;
     final division = _calcularDivision();
@@ -196,6 +198,13 @@ class _AgregarGastoPageState extends State<AgregarGastoPage> {
 
   @override
   Widget build(BuildContext context) {
+    if (_cargandoMiembros) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Agregar gasto')),
+        body: const Center(child: CircularProgressIndicator()),
+      );
+    }
+
     final formatter = NumberFormat.currency(symbol: '\$', decimalDigits: 2);
     final montoTotal = double.tryParse(
         _montoController.text.replaceAll(',', '.')) ?? 0;

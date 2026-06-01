@@ -2,11 +2,11 @@
 // detalle de un grupo con 3 tabs: Gastos, Balances y Actividad
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
-import '../data/mock_data.dart';
 import '../models/grupo.dart';
 import '../models/gasto.dart';
 import '../models/balance.dart';
 import '../models/actividad.dart';
+import '../models/saldo.dart';
 import '../models/usuario.dart';
 import '../services/firebase_service.dart';
 import '../widgets/gasto_card_widget.dart';
@@ -34,9 +34,6 @@ class _GrupoDetallePageState extends State<GrupoDetallePage>
     _tabController.dispose();
     super.dispose();
   }
-
-  // busca el nombre de un usuario en mock data
-  Usuario? _buscarUsuario(String uid) => MockData.buscarUsuario(uid);
 
   // muestra diálogo para agregar miembro por email
   void _mostrarAgregarMiembro(String grupoId) {
@@ -113,7 +110,7 @@ class _GrupoDetallePageState extends State<GrupoDetallePage>
       ),
       // FAB para agregar gasto (solo en el tab de gastos)
       floatingActionButton: FloatingActionButton(
-        onPressed: () => Navigator.pushNamed(context, '/agregar-gasto', arguments: grupo.id),
+        onPressed: () => Navigator.pushNamed(context, '/agregar-gasto', arguments: grupo),
         child: const Icon(Icons.add),
       ),
       body: TabBarView(
@@ -134,8 +131,10 @@ class _GrupoDetallePageState extends State<GrupoDetallePage>
   Widget _buildTabGastos(Grupo grupo) {
     return StreamBuilder<List<Gasto>>(
       stream: FirebaseService.instance.streamGastosGrupo(grupo.id),
-      initialData: MockData.gastosDeGrupo(grupo.id),
       builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Center(child: CircularProgressIndicator());
+        }
         final gastos = snapshot.data ?? [];
 
         if (gastos.isEmpty) {
@@ -161,7 +160,6 @@ class _GrupoDetallePageState extends State<GrupoDetallePage>
             final gasto = gastos[index];
             return GastoCardWidget(
               gasto: gasto,
-              quienPago: _buscarUsuario(gasto.pagadoPor),
               uidActual: _uid,
               onTap: () => Navigator.pushNamed(
                 context, '/gasto-detalle', arguments: gasto,
@@ -175,39 +173,53 @@ class _GrupoDetallePageState extends State<GrupoDetallePage>
 
   // tab de balances — calcula y muestra quién le debe a quién
   Widget _buildTabBalances(Grupo grupo) {
-    final gastos = MockData.gastosDeGrupo(grupo.id);
-    final balances = CalculadorBalances.calcular(gastos, grupoId: grupo.id);
+    return StreamBuilder<List<Gasto>>(
+      stream: FirebaseService.instance.streamGastosGrupo(grupo.id),
+      builder: (context, snapshotGastos) {
+        return StreamBuilder<List<Saldo>>(
+          stream: FirebaseService.instance.streamSaldosGrupo(grupo.id),
+          builder: (context, snapshotSaldos) {
+            if (snapshotGastos.connectionState == ConnectionState.waiting ||
+                snapshotSaldos.connectionState == ConnectionState.waiting) {
+              return const Center(child: CircularProgressIndicator());
+            }
 
-    if (balances.isEmpty) {
-      return const Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.check_circle_outline, size: 64, color: Colors.green),
-            SizedBox(height: 12),
-            Text('¡Todos están en paz! 🎉', style: TextStyle(color: Colors.grey)),
-          ],
-        ),
-      );
-    }
+            final gastos = snapshotGastos.data ?? [];
+            final saldos = snapshotSaldos.data ?? [];
+            final balances = CalculadorBalances.calcular(gastos, saldos: saldos, grupoId: grupo.id);
 
-    return ListView.builder(
-      padding: const EdgeInsets.all(12),
-      itemCount: balances.length,
-      itemBuilder: (context, index) {
-        final balance = balances[index];
-        return BalanceCardWidget(
-          balance: balance,
-          deudor: _buscarUsuario(balance.deudorUid),
-          acreedor: _buscarUsuario(balance.acreedorUid),
-          uidActual: _uid,
-          onSaldar: () => Navigator.pushNamed(
-            context, '/saldar',
-            arguments: {
-              'balance': balance,
-              'grupoId': grupo.id,
-            },
-          ),
+            if (balances.isEmpty) {
+              return const Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.check_circle_outline, size: 64, color: Colors.green),
+                    SizedBox(height: 12),
+                    Text('¡Todos están en paz! 🎉', style: TextStyle(color: Colors.grey)),
+                  ],
+                ),
+              );
+            }
+
+            return ListView.builder(
+              padding: const EdgeInsets.all(12),
+              itemCount: balances.length,
+              itemBuilder: (context, index) {
+                final balance = balances[index];
+                return BalanceCardWidget(
+                  balance: balance,
+                  uidActual: _uid,
+                  onSaldar: () => Navigator.pushNamed(
+                    context, '/saldar',
+                    arguments: {
+                      'balance': balance,
+                      'grupoId': grupo.id,
+                    },
+                  ),
+                );
+              },
+            );
+          },
         );
       },
     );
@@ -217,8 +229,10 @@ class _GrupoDetallePageState extends State<GrupoDetallePage>
   Widget _buildTabActividad(Grupo grupo) {
     return StreamBuilder<List<Actividad>>(
       stream: FirebaseService.instance.streamActividadGrupo(grupo.id),
-      initialData: MockData.actividadesDeGrupo(grupo.id),
       builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Center(child: CircularProgressIndicator());
+        }
         final actividades = snapshot.data ?? [];
 
         if (actividades.isEmpty) {
@@ -239,19 +253,24 @@ class _GrupoDetallePageState extends State<GrupoDetallePage>
           itemCount: actividades.length,
           itemBuilder: (context, index) {
             final act = actividades[index];
-            final actor = _buscarUsuario(act.actorUid);
             final formatter = DateFormat('dd/MM/yy HH:mm');
 
-            return ListTile(
-              leading: CircleAvatar(
-                backgroundColor: Colors.grey.shade100,
-                child: Text(act.emoji, style: const TextStyle(fontSize: 20)),
-              ),
-              title: Text(act.descripcion, style: const TextStyle(fontSize: 13)),
-              subtitle: Text(
-                '${actor?.nombre ?? 'Alguien'} • ${formatter.format(act.creadoEn)}',
-                style: const TextStyle(fontSize: 11),
-              ),
+            return FutureBuilder<Usuario?>(
+              future: FirebaseService.instance.obtenerUsuarioCacheado(act.actorUid),
+              builder: (context, snapshotActor) {
+                final actor = snapshotActor.data;
+                return ListTile(
+                  leading: CircleAvatar(
+                    backgroundColor: Colors.grey.shade100,
+                    child: Text(act.emoji, style: const TextStyle(fontSize: 20)),
+                  ),
+                  title: Text(act.descripcion, style: const TextStyle(fontSize: 13)),
+                  subtitle: Text(
+                    '${actor?.nombre ?? 'Alguien'} • ${formatter.format(act.creadoEn)}',
+                    style: const TextStyle(fontSize: 11),
+                  ),
+                );
+              },
             );
           },
         );
