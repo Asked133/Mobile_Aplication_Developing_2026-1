@@ -2,6 +2,7 @@
 // formulario completo para agregar un gasto al grupo
 // soporta 3 métodos de división: igual, exacto y porcentaje
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import '../models/grupo.dart';
 import '../models/gasto.dart';
@@ -294,6 +295,9 @@ class _AgregarGastoPageState extends State<AgregarGastoPage> {
                 keyboardType: const TextInputType.numberWithOptions(
                   decimal: true,
                 ),
+                inputFormatters: [
+                  FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d*')),
+                ],
                 decoration: const InputDecoration(
                   labelText: 'Monto total',
                   prefixIcon: Icon(Icons.attach_money),
@@ -381,6 +385,11 @@ class _AgregarGastoPageState extends State<AgregarGastoPage> {
                             keyboardType: const TextInputType.numberWithOptions(
                               decimal: true,
                             ),
+                            inputFormatters: [
+                              FilteringTextInputFormatter.allow(
+                                RegExp(r'^\d*\.?\d*'),
+                              ),
+                            ],
                             decoration: const InputDecoration(
                               hintText: 'Monto exacto',
                               isDense: true,
@@ -401,6 +410,11 @@ class _AgregarGastoPageState extends State<AgregarGastoPage> {
                             keyboardType: const TextInputType.numberWithOptions(
                               decimal: true,
                             ),
+                            inputFormatters: [
+                              FilteringTextInputFormatter.allow(
+                                RegExp(r'^\d*\.?\d*'),
+                              ),
+                            ],
                             decoration: const InputDecoration(
                               hintText: 'Porcentaje (%)',
                               isDense: true,
