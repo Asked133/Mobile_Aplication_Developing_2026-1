@@ -42,19 +42,25 @@ class _AgregarGastoPageState extends State<AgregarGastoPage> {
     super.didChangeDependencies();
     if (_cargandoMiembros) {
       final grupo = ModalRoute.of(context)!.settings.arguments as Grupo;
-      
+
       Future.wait(
-        grupo.miembrosUid.map((uid) => FirebaseService.instance.obtenerUsuarioCacheado(uid))
+        grupo.miembrosUid.map(
+          (uid) => FirebaseService.instance.obtenerUsuarioCacheado(uid),
+        ),
       ).then((usuarios) {
         if (!mounted) return;
         setState(() {
           _miembros = usuarios.whereType<Usuario>().toList();
           if (_pagadoPor.isEmpty) _pagadoPor = _uid;
-          
+
           _miembrosSeleccionados = {for (var m in _miembros) m.uid: true};
-          _montoPorMiembro = {for (var m in _miembros) m.uid: TextEditingController()};
-          _porcentajePorMiembro = {for (var m in _miembros) m.uid: TextEditingController()};
-          
+          _montoPorMiembro = {
+            for (var m in _miembros) m.uid: TextEditingController(),
+          };
+          _porcentajePorMiembro = {
+            for (var m in _miembros) m.uid: TextEditingController(),
+          };
+
           _cargandoMiembros = false;
         });
       });
@@ -78,8 +84,8 @@ class _AgregarGastoPageState extends State<AgregarGastoPage> {
 
   // calcula cuánto le toca a cada persona según el método seleccionado
   List<DetallesDivision> _calcularDivision() {
-    final monto = double.tryParse(
-        _montoController.text.replaceAll(',', '.')) ?? 0;
+    final monto =
+        double.tryParse(_montoController.text.replaceAll(',', '.')) ?? 0;
     final seleccionados = _miembros
         .where((m) => _miembrosSeleccionados[m.uid] == true)
         .toList();
@@ -91,27 +97,37 @@ class _AgregarGastoPageState extends State<AgregarGastoPage> {
         // divide entre todos por igual
         final porPersona = monto / seleccionados.length;
         return seleccionados
-            .map((m) => DetallesDivision(
+            .map(
+              (m) => DetallesDivision(
                 uid: m.uid,
-                monto: double.parse(porPersona.toStringAsFixed(2))))
+                monto: double.parse(porPersona.toStringAsFixed(2)),
+              ),
+            )
             .toList();
 
       case MetodoSplit.exacto:
         // usa los montos exactos que ingresó el usuario
         return seleccionados.map((m) {
-          final montoExacto = double.tryParse(
-              _montoPorMiembro[m.uid]?.text.replaceAll(',', '.') ?? '0') ?? 0;
+          final montoExacto =
+              double.tryParse(
+                _montoPorMiembro[m.uid]?.text.replaceAll(',', '.') ?? '0',
+              ) ??
+              0;
           return DetallesDivision(uid: m.uid, monto: montoExacto);
         }).toList();
 
       case MetodoSplit.porcentaje:
         // calcula basándose en porcentajes
         return seleccionados.map((m) {
-          final porcentaje = double.tryParse(
-              _porcentajePorMiembro[m.uid]?.text.replaceAll(',', '.') ?? '0') ?? 0;
+          final porcentaje =
+              double.tryParse(
+                _porcentajePorMiembro[m.uid]?.text.replaceAll(',', '.') ?? '0',
+              ) ??
+              0;
           return DetallesDivision(
-              uid: m.uid,
-              monto: double.parse((monto * porcentaje / 100).toStringAsFixed(2)));
+            uid: m.uid,
+            monto: double.parse((monto * porcentaje / 100).toStringAsFixed(2)),
+          );
         }).toList();
     }
   }
@@ -122,15 +138,17 @@ class _AgregarGastoPageState extends State<AgregarGastoPage> {
 
     final grupo = ModalRoute.of(context)!.settings.arguments as Grupo;
     final grupoId = grupo.id;
-    final monto = double.tryParse(
-        _montoController.text.replaceAll(',', '.')) ?? 0;
+    final monto =
+        double.tryParse(_montoController.text.replaceAll(',', '.')) ?? 0;
     final division = _calcularDivision();
 
     // valida que la suma de la división sea correcta
     if (division.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Selecciona al menos un miembro'),
-            backgroundColor: Colors.red),
+        const SnackBar(
+          content: Text('Selecciona al menos un miembro'),
+          backgroundColor: Colors.red,
+        ),
       );
       return;
     }
@@ -140,13 +158,18 @@ class _AgregarGastoPageState extends State<AgregarGastoPage> {
       final sumaExacta = _miembros
           .where((m) => _miembrosSeleccionados[m.uid] == true)
           .fold<double>(0, (sum, m) {
-        return sum + (double.tryParse(
-            _montoPorMiembro[m.uid]?.text.replaceAll(',', '.') ?? '0') ?? 0);
-      });
+            return sum +
+                (double.tryParse(
+                      _montoPorMiembro[m.uid]?.text.replaceAll(',', '.') ?? '0',
+                    ) ??
+                    0);
+          });
       if ((sumaExacta - monto).abs() > 0.01) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Los montos suman \$${sumaExacta.toStringAsFixed(2)} — deben sumar exactamente \$${monto.toStringAsFixed(2)}'),
+            content: Text(
+              'Los montos suman \$${sumaExacta.toStringAsFixed(2)} — deben sumar exactamente \$${monto.toStringAsFixed(2)}',
+            ),
             backgroundColor: Colors.red,
           ),
         );
@@ -159,13 +182,19 @@ class _AgregarGastoPageState extends State<AgregarGastoPage> {
       final sumaPorcentajes = _miembros
           .where((m) => _miembrosSeleccionados[m.uid] == true)
           .fold<double>(0, (sum, m) {
-        return sum + (double.tryParse(
-            _porcentajePorMiembro[m.uid]?.text.replaceAll(',', '.') ?? '0') ?? 0);
-      });
+            return sum +
+                (double.tryParse(
+                      _porcentajePorMiembro[m.uid]?.text.replaceAll(',', '.') ??
+                          '0',
+                    ) ??
+                    0);
+          });
       if ((sumaPorcentajes - 100).abs() > 0.01) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Los porcentajes suman ${sumaPorcentajes.toStringAsFixed(1)}% — deben sumar 100%'),
+            content: Text(
+              'Los porcentajes suman ${sumaPorcentajes.toStringAsFixed(1)}% — deben sumar 100%',
+            ),
             backgroundColor: Colors.red,
           ),
         );
@@ -225,8 +254,8 @@ class _AgregarGastoPageState extends State<AgregarGastoPage> {
     }
 
     final formatter = NumberFormat.currency(symbol: '\$', decimalDigits: 2);
-    final montoTotal = double.tryParse(
-        _montoController.text.replaceAll(',', '.')) ?? 0;
+    final montoTotal =
+        double.tryParse(_montoController.text.replaceAll(',', '.')) ?? 0;
     final seleccionados = _miembros
         .where((m) => _miembrosSeleccionados[m.uid] == true)
         .length;
@@ -252,7 +281,8 @@ class _AgregarGastoPageState extends State<AgregarGastoPage> {
                   hintText: 'Ej: Cena, Uber, Súper...',
                 ),
                 validator: (value) {
-                  if (value == null || value.trim().isEmpty) return 'La descripción es requerida';
+                  if (value == null || value.trim().isEmpty)
+                    return 'La descripción es requerida';
                   return null;
                 },
               ),
@@ -261,7 +291,9 @@ class _AgregarGastoPageState extends State<AgregarGastoPage> {
               // monto del gasto
               TextFormField(
                 controller: _montoController,
-                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                keyboardType: const TextInputType.numberWithOptions(
+                  decimal: true,
+                ),
                 decoration: const InputDecoration(
                   labelText: 'Monto total',
                   prefixIcon: Icon(Icons.attach_money),
@@ -272,37 +304,48 @@ class _AgregarGastoPageState extends State<AgregarGastoPage> {
               const SizedBox(height: 20),
 
               // ¿quién pagó? — lista de radio buttons
-              const Text('¿Quién pagó?',
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+              const Text(
+                '¿Quién pagó?',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+              ),
               const SizedBox(height: 8),
               ...(_miembros.map((m) {
-                    final seleccionado = m.uid == _pagadoPor;
-                    return ListTile(
-                      title: Text(m.nombre),
-                      leading: Icon(
-                        seleccionado ? Icons.radio_button_checked : Icons.radio_button_unchecked,
-                        color: seleccionado ? Theme.of(context).colorScheme.primary : Colors.grey,
-                      ),
-                      dense: true,
-                      contentPadding: EdgeInsets.zero,
-                      onTap: () => setState(() => _pagadoPor = m.uid),
-                    );
-                  })),
+                final seleccionado = m.uid == _pagadoPor;
+                return ListTile(
+                  title: Text(m.nombre),
+                  leading: Icon(
+                    seleccionado
+                        ? Icons.radio_button_checked
+                        : Icons.radio_button_unchecked,
+                    color: seleccionado
+                        ? Theme.of(context).colorScheme.primary
+                        : Colors.grey,
+                  ),
+                  dense: true,
+                  contentPadding: EdgeInsets.zero,
+                  onTap: () => setState(() => _pagadoPor = m.uid),
+                );
+              })),
               const SizedBox(height: 16),
 
               // categoría
-              const Text('Categoría',
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+              const Text(
+                'Categoría',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+              ),
               const SizedBox(height: 8),
               CategoriaChipWidget(
                 categoriaSeleccionada: _categoriaSeleccionada,
-                onSeleccionar: (cat) => setState(() => _categoriaSeleccionada = cat),
+                onSeleccionar: (cat) =>
+                    setState(() => _categoriaSeleccionada = cat),
               ),
               const SizedBox(height: 20),
 
               // método de división
-              const Text('¿Cómo dividir?',
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+              const Text(
+                '¿Cómo dividir?',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+              ),
               const SizedBox(height: 8),
               SelectorMetodoSplitWidget(
                 seleccionado: _metodoSplit,
@@ -311,51 +354,65 @@ class _AgregarGastoPageState extends State<AgregarGastoPage> {
               const SizedBox(height: 16),
 
               // miembros a incluir (checkboxes)
-              const Text('Dividir entre:',
-                  style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500)),
+              const Text(
+                'Dividir entre:',
+                style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
+              ),
               const SizedBox(height: 4),
               ...(_miembros.map((m) {
                 return CheckboxListTile(
                   title: Text(m.nombre, style: const TextStyle(fontSize: 14)),
                   value: _miembrosSeleccionados[m.uid] ?? false,
                   onChanged: (value) {
-                    setState(() => _miembrosSeleccionados[m.uid] = value ?? false);
+                    setState(
+                      () => _miembrosSeleccionados[m.uid] = value ?? false,
+                    );
                   },
                   dense: true,
                   contentPadding: EdgeInsets.zero,
                   // si es exacto o porcentaje, muestra TextField adicional
-                  subtitle: _metodoSplit == MetodoSplit.exacto &&
+                  subtitle:
+                      _metodoSplit == MetodoSplit.exacto &&
                           _miembrosSeleccionados[m.uid] == true
                       ? Padding(
                           padding: const EdgeInsets.only(top: 4),
                           child: TextField(
                             controller: _montoPorMiembro[m.uid],
-                            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                            keyboardType: const TextInputType.numberWithOptions(
+                              decimal: true,
+                            ),
                             decoration: const InputDecoration(
                               hintText: 'Monto exacto',
                               isDense: true,
-                              contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                              contentPadding: EdgeInsets.symmetric(
+                                horizontal: 10,
+                                vertical: 8,
+                              ),
                             ),
                             style: const TextStyle(fontSize: 13),
                           ),
                         )
                       : _metodoSplit == MetodoSplit.porcentaje &&
-                              _miembrosSeleccionados[m.uid] == true
-                          ? Padding(
-                              padding: const EdgeInsets.only(top: 4),
-                              child: TextField(
-                                controller: _porcentajePorMiembro[m.uid],
-                                keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                                decoration: const InputDecoration(
-                                  hintText: 'Porcentaje (%)',
-                                  isDense: true,
-                                  contentPadding:
-                                      EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                                ),
-                                style: const TextStyle(fontSize: 13),
+                            _miembrosSeleccionados[m.uid] == true
+                      ? Padding(
+                          padding: const EdgeInsets.only(top: 4),
+                          child: TextField(
+                            controller: _porcentajePorMiembro[m.uid],
+                            keyboardType: const TextInputType.numberWithOptions(
+                              decimal: true,
+                            ),
+                            decoration: const InputDecoration(
+                              hintText: 'Porcentaje (%)',
+                              isDense: true,
+                              contentPadding: EdgeInsets.symmetric(
+                                horizontal: 10,
+                                vertical: 8,
                               ),
-                            )
-                          : null,
+                            ),
+                            style: const TextStyle(fontSize: 13),
+                          ),
+                        )
+                      : null,
                 );
               })),
               const SizedBox(height: 12),
@@ -371,7 +428,10 @@ class _AgregarGastoPageState extends State<AgregarGastoPage> {
                   ),
                   child: Text(
                     '${formatter.format(montoPorPersona)} por persona ($seleccionados personas)',
-                    style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
+                    style: const TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w500,
+                    ),
                     textAlign: TextAlign.center,
                   ),
                 ),
@@ -396,12 +456,18 @@ class _AgregarGastoPageState extends State<AgregarGastoPage> {
                   onPressed: _cargando ? null : _guardarGasto,
                   icon: _cargando
                       ? const SizedBox(
-                          height: 20, width: 20,
+                          height: 20,
+                          width: 20,
                           child: CircularProgressIndicator(
-                            strokeWidth: 2, color: Colors.white),
+                            strokeWidth: 2,
+                            color: Colors.white,
+                          ),
                         )
                       : const Icon(Icons.save),
-                  label: const Text('Guardar gasto', style: TextStyle(fontSize: 16)),
+                  label: const Text(
+                    'Guardar gasto',
+                    style: TextStyle(fontSize: 16),
+                  ),
                 ),
               ),
             ],
