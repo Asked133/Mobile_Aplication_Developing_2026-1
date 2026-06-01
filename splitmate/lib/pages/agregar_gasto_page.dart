@@ -1,10 +1,11 @@
 // lib/pages/agregar_gasto_page.dart
 // formulario completo para agregar un gasto al grupo
 // soporta 3 métodos de división: igual, exacto y porcentaje
+// ahora carga miembros del grupo desde Firebase (sin mock data)
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
-import '../data/mock_data.dart';
 import '../models/gasto.dart';
+import '../models/grupo.dart';
 import '../models/usuario.dart';
 import '../services/firebase_service.dart';
 import '../services/notificacion_service.dart';
@@ -24,14 +25,15 @@ class _AgregarGastoPageState extends State<AgregarGastoPage> {
   final _montoController = TextEditingController();
   final _notasController = TextEditingController();
 
-  final _uid = FirebaseService.instance.usuarioActual?.uid ?? 'user1';
+  final _uid = FirebaseService.instance.usuarioActual!.uid;
   String _pagadoPor = '';
   String _categoriaSeleccionada = 'comida';
   MetodoSplit _metodoSplit = MetodoSplit.igual;
   bool _cargando = false;
+  bool _cargandoMiembros = true;
 
-  // miembros del grupo con su estado de selección
-  late List<Usuario> _miembros;
+  // miembros del grupo cargados desde Firebase
+  List<Usuario> _miembros = [];
   late Map<String, bool> _miembrosSeleccionados;
   late Map<String, TextEditingController> _montoPorMiembro;
   late Map<String, TextEditingController> _porcentajePorMiembro;
@@ -39,25 +41,40 @@ class _AgregarGastoPageState extends State<AgregarGastoPage> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    // inicializa miembros basándose en el grupo
+    // carga miembros del grupo desde Firebase
+    if (_cargandoMiembros) {
+      _cargarMiembros();
+    }
+  }
+
+  // carga el grupo desde Firebase y obtiene los perfiles de los miembros
+  Future<void> _cargarMiembros() async {
     final grupoId = ModalRoute.of(context)!.settings.arguments as String;
-    final grupo = MockData.grupos.firstWhere(
-      (g) => g.id == grupoId,
-      orElse: () => MockData.grupos.first,
-    );
 
-    _miembros = grupo.miembrosUid
-        .map((uid) => MockData.buscarUsuario(uid))
-        .whereType<Usuario>()
-        .toList();
+    // obtiene el grupo desde Firebase
+    final grupo = await FirebaseService.instance.obtenerGrupo(grupoId);
+    if (grupo == null || !mounted) return;
 
-    // por defecto el que pagó es el usuario actual
-    if (_pagadoPor.isEmpty) _pagadoPor = _uid;
+    // obtiene los perfiles de los miembros
+    final usuarios = await FirebaseService.instance.obtenerUsuarios(grupo.miembrosUid);
 
-    // inicializa mapas de selección y controllers
-    _miembrosSeleccionados = {for (var m in _miembros) m.uid: true};
-    _montoPorMiembro = {for (var m in _miembros) m.uid: TextEditingController()};
-    _porcentajePorMiembro = {for (var m in _miembros) m.uid: TextEditingController()};
+    if (!mounted) return;
+    setState(() {
+      _miembros = grupo.miembrosUid
+          .map((uid) => usuarios[uid])
+          .whereType<Usuario>()
+          .toList();
+
+      // por defecto el que pagó es el usuario actual
+      if (_pagadoPor.isEmpty) _pagadoPor = _uid;
+
+      // inicializa mapas de selección y controllers
+      _miembrosSeleccionados = {for (var m in _miembros) m.uid: true};
+      _montoPorMiembro = {for (var m in _miembros) m.uid: TextEditingController()};
+      _porcentajePorMiembro = {for (var m in _miembros) m.uid: TextEditingController()};
+
+      _cargandoMiembros = false;
+    });
   }
 
   @override
@@ -65,12 +82,14 @@ class _AgregarGastoPageState extends State<AgregarGastoPage> {
     _descripcionController.dispose();
     _montoController.dispose();
     _notasController.dispose();
-    // limpia controllers de montos y porcentajes
-    for (final c in _montoPorMiembro.values) {
-      c.dispose();
-    }
-    for (final c in _porcentajePorMiembro.values) {
-      c.dispose();
+    // limpia controllers de montos y porcentajes solo si ya se inicializaron
+    if (!_cargandoMiembros) {
+      for (final c in _montoPorMiembro.values) {
+        c.dispose();
+      }
+      for (final c in _porcentajePorMiembro.values) {
+        c.dispose();
+      }
     }
     super.dispose();
   }
@@ -196,6 +215,14 @@ class _AgregarGastoPageState extends State<AgregarGastoPage> {
 
   @override
   Widget build(BuildContext context) {
+    // muestra indicador de carga mientras se cargan los miembros
+    if (_cargandoMiembros) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Agregar gasto')),
+        body: const Center(child: CircularProgressIndicator()),
+      );
+    }
+
     final formatter = NumberFormat.currency(symbol: '\$', decimalDigits: 2);
     final montoTotal = double.tryParse(
         _montoController.text.replaceAll(',', '.')) ?? 0;

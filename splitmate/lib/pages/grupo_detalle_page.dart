@@ -1,8 +1,8 @@
 // lib/pages/grupo_detalle_page.dart
 // detalle de un grupo con 3 tabs: Gastos, Balances y Actividad
+// ahora usa datos 100% de Firebase (sin mock data)
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
-import '../data/mock_data.dart';
 import '../models/grupo.dart';
 import '../models/gasto.dart';
 import '../models/balance.dart';
@@ -21,7 +21,11 @@ class GrupoDetallePage extends StatefulWidget {
 class _GrupoDetallePageState extends State<GrupoDetallePage>
     with SingleTickerProviderStateMixin {
   late TabController _tabController;
-  final _uid = FirebaseService.instance.usuarioActual?.uid ?? 'user1';
+  final _uid = FirebaseService.instance.usuarioActual!.uid;
+
+  // cache de usuarios del grupo (se carga una vez)
+  Map<String, Usuario> _usuarios = {};
+  bool _usuariosCargados = false;
 
   @override
   void initState() {
@@ -30,13 +34,32 @@ class _GrupoDetallePageState extends State<GrupoDetallePage>
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // carga usuarios del grupo desde Firebase una sola vez
+    if (!_usuariosCargados) {
+      _usuariosCargados = true;
+      final grupo = ModalRoute.of(context)!.settings.arguments as Grupo;
+      _cargarUsuarios(grupo.miembrosUid);
+    }
+  }
+
+  // carga los perfiles de los miembros del grupo
+  Future<void> _cargarUsuarios(List<String> uids) async {
+    final usuarios = await FirebaseService.instance.obtenerUsuarios(uids);
+    if (mounted) {
+      setState(() => _usuarios = usuarios);
+    }
+  }
+
+  @override
   void dispose() {
     _tabController.dispose();
     super.dispose();
   }
 
-  // busca el nombre de un usuario en mock data
-  Usuario? _buscarUsuario(String uid) => MockData.buscarUsuario(uid);
+  // busca un usuario en el cache local del grupo
+  Usuario? _buscarUsuario(String uid) => _usuarios[uid];
 
   // muestra diálogo para agregar miembro por email
   void _mostrarAgregarMiembro(String grupoId) {
@@ -111,7 +134,7 @@ class _GrupoDetallePageState extends State<GrupoDetallePage>
           ),
         ],
       ),
-      // FAB para agregar gasto (solo en el tab de gastos)
+      // FAB para agregar gasto
       floatingActionButton: FloatingActionButton(
         onPressed: () => Navigator.pushNamed(context, '/agregar-gasto', arguments: grupo.id),
         child: const Icon(Icons.add),
@@ -130,12 +153,15 @@ class _GrupoDetallePageState extends State<GrupoDetallePage>
     );
   }
 
-  // tab de gastos — lista de gastos del grupo con StreamBuilder
+  // tab de gastos — lista de gastos del grupo con StreamBuilder desde Firebase
   Widget _buildTabGastos(Grupo grupo) {
     return StreamBuilder<List<Gasto>>(
       stream: FirebaseService.instance.streamGastosGrupo(grupo.id),
-      initialData: MockData.gastosDeGrupo(grupo.id),
       builder: (context, snapshot) {
+        // muestra carga mientras llegan los datos
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Center(child: CircularProgressIndicator());
+        }
         final gastos = snapshot.data ?? [];
 
         if (gastos.isEmpty) {
@@ -173,52 +199,62 @@ class _GrupoDetallePageState extends State<GrupoDetallePage>
     );
   }
 
-  // tab de balances — calcula y muestra quién le debe a quién
+  // tab de balances — calcula desde gastos de Firebase en tiempo real
   Widget _buildTabBalances(Grupo grupo) {
-    final gastos = MockData.gastosDeGrupo(grupo.id);
-    final balances = CalculadorBalances.calcular(gastos, grupoId: grupo.id);
+    return StreamBuilder<List<Gasto>>(
+      stream: FirebaseService.instance.streamGastosGrupo(grupo.id),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Center(child: CircularProgressIndicator());
+        }
+        final gastos = snapshot.data ?? [];
+        final balances = CalculadorBalances.calcular(gastos, grupoId: grupo.id);
 
-    if (balances.isEmpty) {
-      return const Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.check_circle_outline, size: 64, color: Colors.green),
-            SizedBox(height: 12),
-            Text('¡Todos están en paz! 🎉', style: TextStyle(color: Colors.grey)),
-          ],
-        ),
-      );
-    }
+        if (balances.isEmpty) {
+          return const Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(Icons.check_circle_outline, size: 64, color: Colors.green),
+                SizedBox(height: 12),
+                Text('¡Todos están en paz! 🎉', style: TextStyle(color: Colors.grey)),
+              ],
+            ),
+          );
+        }
 
-    return ListView.builder(
-      padding: const EdgeInsets.all(12),
-      itemCount: balances.length,
-      itemBuilder: (context, index) {
-        final balance = balances[index];
-        return BalanceCardWidget(
-          balance: balance,
-          deudor: _buscarUsuario(balance.deudorUid),
-          acreedor: _buscarUsuario(balance.acreedorUid),
-          uidActual: _uid,
-          onSaldar: () => Navigator.pushNamed(
-            context, '/saldar',
-            arguments: {
-              'balance': balance,
-              'grupoId': grupo.id,
-            },
-          ),
+        return ListView.builder(
+          padding: const EdgeInsets.all(12),
+          itemCount: balances.length,
+          itemBuilder: (context, index) {
+            final balance = balances[index];
+            return BalanceCardWidget(
+              balance: balance,
+              deudor: _buscarUsuario(balance.deudorUid),
+              acreedor: _buscarUsuario(balance.acreedorUid),
+              uidActual: _uid,
+              onSaldar: () => Navigator.pushNamed(
+                context, '/saldar',
+                arguments: {
+                  'balance': balance,
+                  'grupoId': grupo.id,
+                },
+              ),
+            );
+          },
         );
       },
     );
   }
 
-  // tab de actividad — timeline de acciones recientes en el grupo
+  // tab de actividad — timeline de acciones recientes desde Firebase
   Widget _buildTabActividad(Grupo grupo) {
     return StreamBuilder<List<Actividad>>(
       stream: FirebaseService.instance.streamActividadGrupo(grupo.id),
-      initialData: MockData.actividadesDeGrupo(grupo.id),
       builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Center(child: CircularProgressIndicator());
+        }
         final actividades = snapshot.data ?? [];
 
         if (actividades.isEmpty) {

@@ -1,6 +1,7 @@
 // lib/main.dart
 // punto de entrada de SplitMate — inicializa Firebase, notificaciones y configura rutas
 import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'firebase_options.dart';
@@ -77,10 +78,10 @@ class SplitMateApp extends StatelessWidget {
         ),
       ),
 
-      // ruta inicial
-      initialRoute: '/login',
+      // ruta inicial basada en el estado de autenticación
+      initialRoute: FirebaseAuth.instance.currentUser == null ? '/login' : '/home',
 
-      // rutas nombradas para las 11 páginas
+      // rutas
       routes: {
         '/login':         (_) => const LoginPage(),
         '/registro':      (_) => const RegistroPage(),

@@ -1,8 +1,9 @@
 // lib/pages/home_page.dart
 // página principal — muestra balance general y lista de grupos del usuario
+// ahora usa datos 100% de Firebase (sin mock data)
 import 'package:flutter/material.dart';
-import '../data/mock_data.dart';
 import '../models/balance.dart';
+import '../models/gasto.dart';
 import '../models/grupo.dart';
 import '../services/firebase_service.dart';
 import '../widgets/grupo_card_widget.dart';
@@ -15,8 +16,8 @@ class HomePage extends StatefulWidget {
 }
 
 class _HomePageState extends State<HomePage> {
-  // usa el uid de Firebase si está logueado, o 'user1' para mock
-  final _uid = FirebaseService.instance.usuarioActual?.uid ?? 'user1';
+  // uid del usuario logueado en Firebase
+  final _uid = FirebaseService.instance.usuarioActual!.uid;
 
   @override
   Widget build(BuildContext context) {
@@ -44,10 +45,13 @@ class _HomePageState extends State<HomePage> {
         label: const Text('Nuevo grupo'),
       ),
       body: StreamBuilder<List<Grupo>>(
-        // stream de Firebase con datos mock como fallback
+        // stream de Firebase — datos en tiempo real
         stream: FirebaseService.instance.streamGruposUsuario(_uid),
-        initialData: MockData.grupos.where((g) => g.esMiembro(_uid)).toList(),
         builder: (context, snapshot) {
+          // muestra indicador de carga mientras llegan los datos
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const Center(child: CircularProgressIndicator());
+          }
           if (snapshot.hasError) {
             return Center(child: Text('Error: ${snapshot.error}'));
           }
@@ -61,11 +65,8 @@ class _HomePageState extends State<HomePage> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // tarjeta de balance general del usuario
-                  KpiBalanceWidget(
-                    balance: MockData.balanceGeneralUsuario(_uid),
-                    totalGrupos: grupos.length,
-                  ),
+                  // tarjeta de balance general — calcula desde Firebase
+                  _BalanceGeneralBuilder(uid: _uid, grupos: grupos),
                   const SizedBox(height: 24),
 
                   // título de sección
@@ -94,30 +95,90 @@ class _HomePageState extends State<HomePage> {
                       ),
                     )
                   else
-                    // genera una tarjeta por cada grupo
-                    ...grupos.map((grupo) {
-                      // calcula balance del usuario en este grupo
-                      final balances = CalculadorBalances.calcular(
-                          MockData.gastosDeGrupo(grupo.id), grupoId: grupo.id);
-                      double miBalance = 0;
-                      for (final b in balances) {
-                        if (b.acreedorUid == _uid) miBalance += b.monto;
-                        if (b.deudorUid   == _uid) miBalance -= b.monto;
-                      }
-                      return GrupoCardWidget(
-                        grupo: grupo,
-                        balanceUsuario: miBalance,
-                        onTap: () => Navigator.pushNamed(
-                          context, '/grupo-detalle', arguments: grupo,
-                        ),
-                      );
-                    }),
+                    // genera una tarjeta por cada grupo con balance calculado desde Firebase
+                    ...grupos.map((grupo) => _GrupoConBalance(
+                      grupo: grupo,
+                      uid: _uid,
+                    )),
                 ],
               ),
             ),
           );
         },
       ),
+    );
+  }
+}
+
+// widget que calcula el balance general del usuario sumando todos los grupos
+class _BalanceGeneralBuilder extends StatelessWidget {
+  final String uid;
+  final List<Grupo> grupos;
+
+  const _BalanceGeneralBuilder({required this.uid, required this.grupos});
+
+  @override
+  Widget build(BuildContext context) {
+    if (grupos.isEmpty) {
+      return KpiBalanceWidget(balance: 0, totalGrupos: 0);
+    }
+
+    // usa FutureBuilder para calcular el balance total desde Firebase
+    return FutureBuilder<double>(
+      future: _calcularBalanceTotal(),
+      builder: (context, snapshot) {
+        return KpiBalanceWidget(
+          balance: snapshot.data ?? 0,
+          totalGrupos: grupos.length,
+        );
+      },
+    );
+  }
+
+  // calcula el balance total del usuario sumando los balances de todos los grupos
+  Future<double> _calcularBalanceTotal() async {
+    double total = 0;
+    for (final grupo in grupos) {
+      final gastos = await FirebaseService.instance.obtenerGastosGrupo(grupo.id);
+      final balances = CalculadorBalances.calcular(gastos, grupoId: grupo.id);
+      for (final b in balances) {
+        if (b.acreedorUid == uid) total += b.monto; // te deben
+        if (b.deudorUid   == uid) total -= b.monto; // debes
+      }
+    }
+    return total;
+  }
+}
+
+// widget que muestra un grupo con su balance calculado desde Firebase
+class _GrupoConBalance extends StatelessWidget {
+  final Grupo grupo;
+  final String uid;
+
+  const _GrupoConBalance({required this.grupo, required this.uid});
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<List<Gasto>>(
+      future: FirebaseService.instance.obtenerGastosGrupo(grupo.id),
+      builder: (context, snapshot) {
+        // calcula balance del usuario en este grupo
+        final gastos = snapshot.data ?? [];
+        final balances = CalculadorBalances.calcular(gastos, grupoId: grupo.id);
+        double miBalance = 0;
+        for (final b in balances) {
+          if (b.acreedorUid == uid) miBalance += b.monto;
+          if (b.deudorUid   == uid) miBalance -= b.monto;
+        }
+
+        return GrupoCardWidget(
+          grupo: grupo,
+          balanceUsuario: miBalance,
+          onTap: () => Navigator.pushNamed(
+            context, '/grupo-detalle', arguments: grupo,
+          ),
+        );
+      },
     );
   }
 }

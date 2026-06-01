@@ -1,9 +1,10 @@
 // lib/pages/saldar_page.dart
 // pantalla para confirmar el pago de una deuda
+// ahora usa datos 100% de Firebase (sin mock data)
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
-import '../data/mock_data.dart';
 import '../models/balance.dart';
+import '../models/usuario.dart';
 import '../services/firebase_service.dart';
 import '../utils/constantes.dart';
 import '../widgets/avatar_iniciales_widget.dart';
@@ -21,6 +22,11 @@ class _SaldarPageState extends State<SaldarPage> {
   String _metodoPago = 'efectivo';
   bool _cargando = false;
 
+  // usuarios involucrados en la deuda
+  Usuario? _deudor;
+  Usuario? _acreedor;
+  bool _cargandoUsuarios = true;
+
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
@@ -28,6 +34,23 @@ class _SaldarPageState extends State<SaldarPage> {
     final args = ModalRoute.of(context)!.settings.arguments as Map<String, dynamic>;
     final balance = args['balance'] as Balance;
     _montoController = TextEditingController(text: balance.monto.toStringAsFixed(2));
+
+    if (_cargandoUsuarios) {
+      _cargarUsuarios(balance);
+    }
+  }
+
+  // carga los perfiles del deudor y acreedor desde Firebase
+  Future<void> _cargarUsuarios(Balance balance) async {
+    final usuarios = await FirebaseService.instance
+        .obtenerUsuarios([balance.deudorUid, balance.acreedorUid]);
+    if (mounted) {
+      setState(() {
+        _deudor = usuarios[balance.deudorUid];
+        _acreedor = usuarios[balance.acreedorUid];
+        _cargandoUsuarios = false;
+      });
+    }
   }
 
   @override
@@ -83,130 +106,129 @@ class _SaldarPageState extends State<SaldarPage> {
     final balance = args['balance'] as Balance;
     final formatter = NumberFormat.currency(symbol: '\$', decimalDigits: 2);
 
-    final deudor = MockData.buscarUsuario(balance.deudorUid);
-    final acreedor = MockData.buscarUsuario(balance.acreedorUid);
-
     return Scaffold(
       appBar: AppBar(title: const Text('Saldar deuda')),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(20),
-        child: Form(
-          key: _formKey,
-          child: Column(
-            children: [
-              // visualización de la deuda: deudor → acreedor
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(24),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(16),
-                ),
+      body: _cargandoUsuarios
+          ? const Center(child: CircularProgressIndicator())
+          : SingleChildScrollView(
+              padding: const EdgeInsets.all(20),
+              child: Form(
+                key: _formKey,
                 child: Column(
                   children: [
+                    // visualización de la deuda: deudor → acreedor
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(24),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      child: Column(
+                        children: [
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                            children: [
+                              // deudor
+                              Column(
+                                children: [
+                                  AvatarInicialesWidget(
+                                      nombre: _deudor?.nombre ?? '?', radio: 30),
+                                  const SizedBox(height: 8),
+                                  Text(_deudor?.nombre ?? 'Tú',
+                                      style: const TextStyle(fontWeight: FontWeight.bold)),
+                                ],
+                              ),
+                              // flecha
+                              const Icon(Icons.arrow_forward, size: 28, color: Colors.grey),
+                              // acreedor
+                              Column(
+                                children: [
+                                  AvatarInicialesWidget(
+                                      nombre: _acreedor?.nombre ?? '?', radio: 30),
+                                  const SizedBox(height: 8),
+                                  Text(_acreedor?.nombre ?? 'Alguien',
+                                      style: const TextStyle(fontWeight: FontWeight.bold)),
+                                ],
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 16),
+                          Text(
+                            formatter.format(balance.monto),
+                            style: const TextStyle(fontSize: 28, fontWeight: FontWeight.bold),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+
+                    // monto a pagar (editable)
+                    TextFormField(
+                      controller: _montoController,
+                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                      decoration: const InputDecoration(
+                        labelText: 'Monto a pagar',
+                        prefixIcon: Icon(Icons.attach_money),
+                      ),
+                      validator: (value) {
+                        if (value == null || value.isEmpty) return 'Ingresa el monto';
+                        final n = double.tryParse(value.replaceAll(',', '.'));
+                        if (n == null || n <= 0) return 'Debe ser mayor a 0';
+                        return null;
+                      },
+                    ),
+                    const SizedBox(height: 16),
+
+                    // método de pago — selector visual (igual que parcial1)
+                    const Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text('Método de pago',
+                          style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500)),
+                    ),
+                    const SizedBox(height: 8),
                     Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                       children: [
-                        // deudor
-                        Column(
-                          children: [
-                            AvatarInicialesWidget(
-                                nombre: deudor?.nombre ?? '?', radio: 30),
-                            const SizedBox(height: 8),
-                            Text(deudor?.nombre ?? 'Tú',
-                                style: const TextStyle(fontWeight: FontWeight.bold)),
-                          ],
-                        ),
-                        // flecha
-                        const Icon(Icons.arrow_forward, size: 28, color: Colors.grey),
-                        // acreedor
-                        Column(
-                          children: [
-                            AvatarInicialesWidget(
-                                nombre: acreedor?.nombre ?? '?', radio: 30),
-                            const SizedBox(height: 8),
-                            Text(acreedor?.nombre ?? 'Alguien',
-                                style: const TextStyle(fontWeight: FontWeight.bold)),
-                          ],
-                        ),
+                        _buildMetodoPago('efectivo', Icons.money, 'Efectivo'),
+                        const SizedBox(width: 8),
+                        _buildMetodoPago('transferencia', Icons.account_balance, 'Transfer.'),
+                        const SizedBox(width: 8),
+                        _buildMetodoPago('otro', Icons.more_horiz, 'Otro'),
                       ],
                     ),
                     const SizedBox(height: 16),
-                    Text(
-                      formatter.format(balance.monto),
-                      style: const TextStyle(fontSize: 28, fontWeight: FontWeight.bold),
+
+                    // nota opcional
+                    TextFormField(
+                      controller: _notaController,
+                      maxLines: 2,
+                      decoration: const InputDecoration(
+                        labelText: 'Nota (opcional)',
+                        prefixIcon: Icon(Icons.note_outlined),
+                      ),
+                    ),
+                    const SizedBox(height: 30),
+
+                    // botón confirmar pago
+                    SizedBox(
+                      width: double.infinity,
+                      height: 48,
+                      child: ElevatedButton.icon(
+                        onPressed: _cargando ? null : _confirmarPago,
+                        icon: _cargando
+                            ? const SizedBox(
+                                height: 20, width: 20,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2, color: Colors.white),
+                              )
+                            : const Icon(Icons.check),
+                        label: const Text('Confirmar pago', style: TextStyle(fontSize: 16)),
+                      ),
                     ),
                   ],
                 ),
               ),
-              const SizedBox(height: 20),
-
-              // monto a pagar (editable)
-              TextFormField(
-                controller: _montoController,
-                keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                decoration: const InputDecoration(
-                  labelText: 'Monto a pagar',
-                  prefixIcon: Icon(Icons.attach_money),
-                ),
-                validator: (value) {
-                  if (value == null || value.isEmpty) return 'Ingresa el monto';
-                  final n = double.tryParse(value.replaceAll(',', '.'));
-                  if (n == null || n <= 0) return 'Debe ser mayor a 0';
-                  return null;
-                },
-              ),
-              const SizedBox(height: 16),
-
-              // método de pago — selector visual (igual que parcial1)
-              const Align(
-                alignment: Alignment.centerLeft,
-                child: Text('Método de pago',
-                    style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500)),
-              ),
-              const SizedBox(height: 8),
-              Row(
-                children: [
-                  _buildMetodoPago('efectivo', Icons.money, 'Efectivo'),
-                  const SizedBox(width: 8),
-                  _buildMetodoPago('transferencia', Icons.account_balance, 'Transfer.'),
-                  const SizedBox(width: 8),
-                  _buildMetodoPago('otro', Icons.more_horiz, 'Otro'),
-                ],
-              ),
-              const SizedBox(height: 16),
-
-              // nota opcional
-              TextFormField(
-                controller: _notaController,
-                maxLines: 2,
-                decoration: const InputDecoration(
-                  labelText: 'Nota (opcional)',
-                  prefixIcon: Icon(Icons.note_outlined),
-                ),
-              ),
-              const SizedBox(height: 30),
-
-              // botón confirmar pago
-              SizedBox(
-                width: double.infinity,
-                height: 48,
-                child: ElevatedButton.icon(
-                  onPressed: _cargando ? null : _confirmarPago,
-                  icon: _cargando
-                      ? const SizedBox(
-                          height: 20, width: 20,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2, color: Colors.white),
-                        )
-                      : const Icon(Icons.check),
-                  label: const Text('Confirmar pago', style: TextStyle(fontSize: 16)),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
+            ),
     );
   }
 

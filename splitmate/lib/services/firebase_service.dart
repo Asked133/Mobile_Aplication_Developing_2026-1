@@ -9,12 +9,14 @@ import '../models/gasto.dart';
 import '../models/actividad.dart';
 
 class FirebaseService {
-  // singleton igual que en parcial1
   static final FirebaseService instance = FirebaseService._();
   FirebaseService._();
 
   final _auth = FirebaseAuth.instance;
   final _db   = FirebaseFirestore.instance;
+
+  // cache local de usuarios para evitar consultas repetidas
+  final Map<String, Usuario> _cacheUsuarios = {};
 
   // ─── AUTH ─────────────────────────────────────────────────────────────────
 
@@ -49,6 +51,12 @@ class FirebaseService {
         'email': email,
         'creadoEn': FieldValue.serverTimestamp(),
       });
+      // guarda en cache
+      _cacheUsuarios[cred.user!.uid] = Usuario(
+        uid: cred.user!.uid,
+        nombre: nombre,
+        email: email,
+      );
       return null;
     } on FirebaseAuthException catch (e) {
       return _mensajeError(e.code);
@@ -82,19 +90,51 @@ class FirebaseService {
     }
   }
 
-  // cierra sesión de Firebase y Google
+  // cierra sesión de Firebase y Google — limpia cache
   Future<void> cerrarSesion() async {
+    _cacheUsuarios.clear();
     await GoogleSignIn().signOut();
     await _auth.signOut();
   }
 
   // ─── USUARIOS ─────────────────────────────────────────────────────────────
 
-  // obtiene el perfil de un usuario por uid
+  // obtiene el perfil de un usuario por uid (con cache)
   Future<Usuario?> obtenerUsuario(String uid) async {
+    // revisa cache primero
+    if (_cacheUsuarios.containsKey(uid)) return _cacheUsuarios[uid];
     final doc = await _db.collection('usuarios').doc(uid).get();
     if (!doc.exists) return null;
-    return Usuario.fromMap(uid, doc.data()!);
+    final usuario = Usuario.fromMap(uid, doc.data()!);
+    _cacheUsuarios[uid] = usuario; // guarda en cache
+    return usuario;
+  }
+
+  // obtiene múltiples usuarios por uid (para cargar miembros de un grupo)
+  Future<Map<String, Usuario>> obtenerUsuarios(List<String> uids) async {
+    final Map<String, Usuario> resultado = {};
+    final List<String> sinCache = [];
+
+    // primero revisa cache
+    for (final uid in uids) {
+      if (_cacheUsuarios.containsKey(uid)) {
+        resultado[uid] = _cacheUsuarios[uid]!;
+      } else {
+        sinCache.add(uid);
+      }
+    }
+
+    // los que no están en cache se consultan en Firestore
+    for (final uid in sinCache) {
+      final doc = await _db.collection('usuarios').doc(uid).get();
+      if (doc.exists) {
+        final usuario = Usuario.fromMap(uid, doc.data()!);
+        _cacheUsuarios[uid] = usuario;
+        resultado[uid] = usuario;
+      }
+    }
+
+    return resultado;
   }
 
   // busca usuario por email (para agregar a grupo)
@@ -104,7 +144,9 @@ class FirebaseService {
         .limit(1)
         .get();
     if (query.docs.isEmpty) return null;
-    return Usuario.fromMap(query.docs.first.id, query.docs.first.data());
+    final usuario = Usuario.fromMap(query.docs.first.id, query.docs.first.data());
+    _cacheUsuarios[usuario.uid] = usuario;
+    return usuario;
   }
 
   // actualiza el token FCM del usuario para notificaciones push
@@ -183,6 +225,17 @@ class FirebaseService {
         .map((snap) => snap.docs
             .map((d) => Gasto.fromMap(d.id, d.data()))
             .toList());
+  }
+
+  // obtiene los gastos de un grupo como Future (para cálculos puntuales)
+  Future<List<Gasto>> obtenerGastosGrupo(String grupoId) async {
+    final snap = await _db
+        .collection('grupos')
+        .doc(grupoId)
+        .collection('gastos')
+        .orderBy('fecha', descending: true)
+        .get();
+    return snap.docs.map((d) => Gasto.fromMap(d.id, d.data())).toList();
   }
 
   // agrega un gasto al grupo y registra la actividad
@@ -293,6 +346,9 @@ class FirebaseService {
   }
 
   // ─── HELPERS ─────────────────────────────────────────────────────────────
+
+  // busca un usuario en cache (sincrónico, para widgets que ya cargaron usuarios)
+  Usuario? buscarUsuarioEnCache(String uid) => _cacheUsuarios[uid];
 
   // traduce códigos de error de Firebase a mensajes amigables en español
   String _mensajeError(String code) => switch (code) {
