@@ -135,6 +135,25 @@ class _AgregarGastoPageState extends State<AgregarGastoPage> {
       return;
     }
 
+    // valida que montos exactos sumen el total
+    if (_metodoSplit == MetodoSplit.exacto) {
+      final sumaExacta = _miembros
+          .where((m) => _miembrosSeleccionados[m.uid] == true)
+          .fold<double>(0, (sum, m) {
+        return sum + (double.tryParse(
+            _montoPorMiembro[m.uid]?.text.replaceAll(',', '.') ?? '0') ?? 0);
+      });
+      if ((sumaExacta - monto).abs() > 0.01) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Los montos suman \$${sumaExacta.toStringAsFixed(2)} — deben sumar exactamente \$${monto.toStringAsFixed(2)}'),
+            backgroundColor: Colors.red,
+          ),
+        );
+        return;
+      }
+    }
+
     // valida porcentajes sumen 100%
     if (_metodoSplit == MetodoSplit.porcentaje) {
       final sumaPorcentajes = _miembros
