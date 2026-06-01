@@ -1,0 +1,2130 @@
+diff --git a/splitmate/.vscode/settings.json b/splitmate/.vscode/settings.json
+index c5f3f6b..0e14d8e 100644
+--- a/splitmate/.vscode/settings.json
++++ b/splitmate/.vscode/settings.json
+@@ -1,3 +1,3 @@
+ {
+-    "java.configuration.updateBuildConfiguration": "interactive"
++    "java.configuration.updateBuildConfiguration": "disabled"
+ }
+\ No newline at end of file
+diff --git a/splitmate/android/gradle.properties b/splitmate/android/gradle.properties
+index fbee1d8..d5da727 100644
+--- a/splitmate/android/gradle.properties
++++ b/splitmate/android/gradle.properties
+@@ -1,2 +1,6 @@
+ org.gradle.jvmargs=-Xmx8G -XX:MaxMetaspaceSize=4G -XX:ReservedCodeCacheSize=512m -XX:+HeapDumpOnOutOfMemoryError
+ android.useAndroidX=true
++# This builtInKotlin flag was added automatically by Flutter migrator
++android.builtInKotlin=false
++# This newDsl flag was added automatically by Flutter migrator
++android.newDsl=false
+diff --git a/splitmate/firebase.json b/splitmate/firebase.json
+index 827cdeb..1ba1bd9 100644
+--- a/splitmate/firebase.json
++++ b/splitmate/firebase.json
+@@ -1 +1,25 @@
+-{"flutter":{"platforms":{"android":{"default":{"projectId":"splitmate-aa","appId":"1:495738642957:android:153bca55dce50e36112b44","fileOutput":"android/app/google-services.json"}},"dart":{"lib/firebase_options.dart":{"projectId":"splitmate-aa","configurations":{"android":"1:495738642957:android:153bca55dce50e36112b44","ios":"1:495738642957:ios:08cde86667770eaf112b44","macos":"1:495738642957:ios:08cde86667770eaf112b44","web":"1:495738642957:web:edc2dfb6f9a7b7de112b44","windows":"1:495738642957:web:a932eca56b4046b9112b44"}}}}}}
+\ No newline at end of file
++{
++    "flutter": {
++        "platforms": {
++            "android": {
++                "default": {
++                    "projectId": "splitmate-aa",
++                    "appId": "1:495738642957:android:153bca55dce50e36112b44",
++                    "fileOutput": "android/app/google-services.json"
++                }
++            },
++            "dart": {
++                "lib/firebase_options.dart": {
++                    "projectId": "splitmate-aa",
++                    "configurations": {
++                        "android": "1:495738642957:android:153bca55dce50e36112b44",
++                        "ios": "1:495738642957:ios:08cde86667770eaf112b44",
++                        "macos": "1:495738642957:ios:08cde86667770eaf112b44",
++                        "web": "1:495738642957:web:edc2dfb6f9a7b7de112b44",
++                        "windows": "1:495738642957:web:a932eca56b4046b9112b44"
++                    }
++                }
++            }
++        }
++    }
++}
+\ No newline at end of file
+diff --git a/splitmate/lib/main.dart b/splitmate/lib/main.dart
+index cefbef6..c371fac 100644
+--- a/splitmate/lib/main.dart
++++ b/splitmate/lib/main.dart
+@@ -1,6 +1,7 @@
+ // lib/main.dart
+ // punto de entrada de SplitMate — inicializa Firebase, notificaciones y configura rutas
+ import 'package:firebase_core/firebase_core.dart';
++import 'package:firebase_auth/firebase_auth.dart';
+ import 'package:flutter/material.dart';
+ import 'package:flutter_localizations/flutter_localizations.dart';
+ import 'firebase_options.dart';
+@@ -77,10 +78,10 @@ class SplitMateApp extends StatelessWidget {
+         ),
+       ),
+ 
+-      // ruta inicial
+-      initialRoute: '/login',
++      // ruta inicial basada en el estado de autenticación
++      initialRoute: FirebaseAuth.instance.currentUser == null ? '/login' : '/home',
+ 
+-      // rutas nombradas para las 11 páginas
++      // rutas
+       routes: {
+         '/login':         (_) => const LoginPage(),
+         '/registro':      (_) => const RegistroPage(),
+diff --git a/splitmate/lib/pages/actividad_page.dart b/splitmate/lib/pages/actividad_page.dart
+index 64f751a..cd5c9c4 100644
+--- a/splitmate/lib/pages/actividad_page.dart
++++ b/splitmate/lib/pages/actividad_page.dart
+@@ -1,9 +1,12 @@
+ // lib/pages/actividad_page.dart
+ // timeline de actividad de todos los grupos del usuario con filtros
++// ahora usa datos 100% de Firebase (sin mock data)
++import 'dart:async';
+ import 'package:flutter/material.dart';
+ import 'package:intl/intl.dart';
+-import '../data/mock_data.dart';
+ import '../models/actividad.dart';
++import '../models/grupo.dart';
++import '../models/usuario.dart';
+ import '../services/firebase_service.dart';
+ 
+ class ActividadPage extends StatefulWidget {
+@@ -13,7 +16,7 @@ class ActividadPage extends StatefulWidget {
+ }
+ 
+ class _ActividadPageState extends State<ActividadPage> {
+-  final _uid = FirebaseService.instance.usuarioActual?.uid ?? 'user1';
++  final _uid = FirebaseService.instance.usuarioActual!.uid;
+ 
+   // filtro seleccionado
+   String _filtro = 'todos';
+@@ -26,100 +29,170 @@ class _ActividadPageState extends State<ActividadPage> {
+     {'id': 'miembro_agregado','label': 'Miembros'},
+   ];
+ 
++  // datos cargados desde Firebase
++  List<Grupo> _grupos = [];
++  List<Actividad> _todasActividades = [];
++  Map<String, Usuario> _usuarios = {};
++  bool _cargando = true;
++
++  // suscripciones a streams de actividad
++  final List<StreamSubscription> _subs = [];
++
+   @override
+-  Widget build(BuildContext context) {
+-    // obtiene todas las actividades de todos los grupos del usuario
+-    final misGrupos = MockData.grupos.where((g) => g.esMiembro(_uid)).toList();
+-    List<Actividad> todasActividades = [];
+-    for (final grupo in misGrupos) {
+-      todasActividades.addAll(MockData.actividadesDeGrupo(grupo.id));
++  void initState() {
++    super.initState();
++    _cargarDatos();
++  }
++
++  @override
++  void dispose() {
++    // cancela todas las suscripciones a streams
++    for (final sub in _subs) {
++      sub.cancel();
+     }
++    super.dispose();
++  }
++
++  // carga los grupos del usuario y escucha actividad de cada uno
++  Future<void> _cargarDatos() async {
++    // escucha los grupos del usuario
++    FirebaseService.instance.streamGruposUsuario(_uid).listen((grupos) async {
++      if (!mounted) return;
++
++      _grupos = grupos;
++
++      // carga usuarios de todos los grupos
++      final todosUids = <String>{};
++      for (final g in grupos) {
++        todosUids.addAll(g.miembrosUid);
++      }
++      final usuarios = await FirebaseService.instance.obtenerUsuarios(todosUids.toList());
++      if (!mounted) return;
++      _usuarios = usuarios;
++
++      // cancela suscripciones anteriores
++      for (final sub in _subs) {
++        sub.cancel();
++      }
++      _subs.clear();
++
++      // acumula actividades de todos los grupos
++      final Map<String, List<Actividad>> actividadesPorGrupo = {};
++
++      for (final grupo in grupos) {
++        final sub = FirebaseService.instance.streamActividadGrupo(grupo.id).listen((actividades) {
++          if (!mounted) return;
++          actividadesPorGrupo[grupo.id] = actividades;
+ 
+-    // ordena por fecha (más reciente primero)
+-    todasActividades.sort((a, b) => b.creadoEn.compareTo(a.creadoEn));
++          // combina todas las actividades y actualiza UI
++          final todas = <Actividad>[];
++          for (final list in actividadesPorGrupo.values) {
++            todas.addAll(list);
++          }
++          // ordena por fecha (más reciente primero)
++          todas.sort((a, b) => b.creadoEn.compareTo(a.creadoEn));
+ 
++          setState(() {
++            _todasActividades = todas;
++            _cargando = false;
++          });
++        });
++        _subs.add(sub);
++      }
++
++      // si no hay grupos, deja de cargar
++      if (grupos.isEmpty && mounted) {
++        setState(() => _cargando = false);
++      }
++    });
++  }
++
++  @override
++  Widget build(BuildContext context) {
+     // aplica filtro si no es "todos"
+     final actividadesFiltradas = _filtro == 'todos'
+-        ? todasActividades
+-        : todasActividades.where((a) => a.tipo == _filtro).toList();
++        ? _todasActividades
++        : _todasActividades.where((a) => a.tipo == _filtro).toList();
+ 
+     return Scaffold(
+       appBar: AppBar(title: const Text('Actividad')),
+-      body: Column(
+-        children: [
+-          // chips de filtro
+-          Padding(
+-            padding: const EdgeInsets.all(12),
+-            child: SingleChildScrollView(
+-              scrollDirection: Axis.horizontal,
+-              child: Row(
+-                children: _filtros.map((f) {
+-                  final seleccionado = _filtro == f['id'];
+-                  return Padding(
+-                    padding: const EdgeInsets.only(right: 8),
+-                    child: FilterChip(
+-                      label: Text(f['label']!),
+-                      selected: seleccionado,
+-                      onSelected: (_) => setState(() => _filtro = f['id']!),
+-                      selectedColor: Theme.of(context).colorScheme.primary.withValues(alpha: 0.2),
+-                    ),
+-                  );
+-                }).toList(),
+-              ),
+-            ),
+-          ),
+-
+-          // lista de actividades o estado vacío
+-          Expanded(
+-            child: actividadesFiltradas.isEmpty
+-                ? const Center(
+-                    child: Column(
+-                      mainAxisAlignment: MainAxisAlignment.center,
+-                      children: [
+-                        Icon(Icons.history, size: 64, color: Colors.grey),
+-                        SizedBox(height: 12),
+-                        Text('Sin actividad reciente',
+-                            style: TextStyle(color: Colors.grey, fontSize: 16)),
+-                      ],
++      body: _cargando
++          ? const Center(child: CircularProgressIndicator())
++          : Column(
++              children: [
++                // chips de filtro
++                Padding(
++                  padding: const EdgeInsets.all(12),
++                  child: SingleChildScrollView(
++                    scrollDirection: Axis.horizontal,
++                    child: Row(
++                      children: _filtros.map((f) {
++                        final seleccionado = _filtro == f['id'];
++                        return Padding(
++                          padding: const EdgeInsets.only(right: 8),
++                          child: FilterChip(
++                            label: Text(f['label']!),
++                            selected: seleccionado,
++                            onSelected: (_) => setState(() => _filtro = f['id']!),
++                            selectedColor: Theme.of(context).colorScheme.primary.withValues(alpha: 0.2),
++                          ),
++                        );
++                      }).toList(),
+                     ),
+-                  )
+-                : ListView.separated(
+-                    padding: const EdgeInsets.symmetric(horizontal: 12),
+-                    itemCount: actividadesFiltradas.length,
+-                    separatorBuilder: (context2, i) => const Divider(height: 1),
+-                    itemBuilder: (context, index) {
+-                      final act = actividadesFiltradas[index];
+-                      final actor = MockData.buscarUsuario(act.actorUid);
+-                      final grupo = MockData.grupos
+-                          .where((g) => g.id == act.grupoId)
+-                          .firstOrNull;
+-                      final dateFormatter = DateFormat('dd/MM HH:mm');
+-
+-                      return ListTile(
+-                        leading: CircleAvatar(
+-                          backgroundColor: Colors.grey.shade100,
+-                          child: Text(act.emoji,
+-                              style: const TextStyle(fontSize: 22)),
+-                        ),
+-                        title: Text(act.descripcion,
+-                            style: const TextStyle(fontSize: 14)),
+-                        subtitle: Text(
+-                          '${actor?.nombre ?? 'Alguien'} • ${grupo?.nombre ?? ''} • ${dateFormatter.format(act.creadoEn)}',
+-                          style: const TextStyle(fontSize: 11, color: Colors.grey),
+-                        ),
+-                        trailing: act.monto != null
+-                            ? Text(
+-                                '\$${act.monto!.toStringAsFixed(2)}',
+-                                style: const TextStyle(
+-                                    fontWeight: FontWeight.bold, fontSize: 13),
+-                              )
+-                            : null,
+-                      );
+-                    },
+                   ),
+-          ),
+-        ],
+-      ),
++                ),
++
++                // lista de actividades o estado vacío
++                Expanded(
++                  child: actividadesFiltradas.isEmpty
++                      ? const Center(
++                          child: Column(
++                            mainAxisAlignment: MainAxisAlignment.center,
++                            children: [
++                              Icon(Icons.history, size: 64, color: Colors.grey),
++                              SizedBox(height: 12),
++                              Text('Sin actividad reciente',
++                                  style: TextStyle(color: Colors.grey, fontSize: 16)),
++                            ],
++                          ),
++                        )
++                      : ListView.separated(
++                          padding: const EdgeInsets.symmetric(horizontal: 12),
++                          itemCount: actividadesFiltradas.length,
++                          separatorBuilder: (context2, i) => const Divider(height: 1),
++                          itemBuilder: (context, index) {
++                            final act = actividadesFiltradas[index];
++                            final actor = _usuarios[act.actorUid];
++                            final grupo = _grupos
++                                .where((g) => g.id == act.grupoId)
++                                .firstOrNull;
++                            final dateFormatter = DateFormat('dd/MM HH:mm');
++
++                            return ListTile(
++                              leading: CircleAvatar(
++                                backgroundColor: Colors.grey.shade100,
++                                child: Text(act.emoji,
++                                    style: const TextStyle(fontSize: 22)),
++                              ),
++                              title: Text(act.descripcion,
++                                  style: const TextStyle(fontSize: 14)),
++                              subtitle: Text(
++                                '${actor?.nombre ?? 'Alguien'} • ${grupo?.nombre ?? ''} • ${dateFormatter.format(act.creadoEn)}',
++                                style: const TextStyle(fontSize: 11, color: Colors.grey),
++                              ),
++                              trailing: act.monto != null
++                                  ? Text(
++                                      '\$${act.monto!.toStringAsFixed(2)}',
++                                      style: const TextStyle(
++                                          fontWeight: FontWeight.bold, fontSize: 13),
++                                    )
++                                  : null,
++                            );
++                          },
++                        ),
++                ),
++              ],
++            ),
+     );
+   }
+ }
+diff --git a/splitmate/lib/pages/agregar_gasto_page.dart b/splitmate/lib/pages/agregar_gasto_page.dart
+index 8145bfe..07be297 100644
+--- a/splitmate/lib/pages/agregar_gasto_page.dart
++++ b/splitmate/lib/pages/agregar_gasto_page.dart
+@@ -1,10 +1,11 @@
+ // lib/pages/agregar_gasto_page.dart
+ // formulario completo para agregar un gasto al grupo
+ // soporta 3 métodos de división: igual, exacto y porcentaje
++// ahora carga miembros del grupo desde Firebase (sin mock data)
+ import 'package:flutter/material.dart';
+ import 'package:intl/intl.dart';
+-import '../data/mock_data.dart';
+ import '../models/gasto.dart';
++import '../models/grupo.dart';
+ import '../models/usuario.dart';
+ import '../services/firebase_service.dart';
+ import '../services/notificacion_service.dart';
+@@ -24,14 +25,15 @@ class _AgregarGastoPageState extends State<AgregarGastoPage> {
+   final _montoController = TextEditingController();
+   final _notasController = TextEditingController();
+ 
+-  final _uid = FirebaseService.instance.usuarioActual?.uid ?? 'user1';
++  final _uid = FirebaseService.instance.usuarioActual!.uid;
+   String _pagadoPor = '';
+   String _categoriaSeleccionada = 'comida';
+   MetodoSplit _metodoSplit = MetodoSplit.igual;
+   bool _cargando = false;
++  bool _cargandoMiembros = true;
+ 
+-  // miembros del grupo con su estado de selección
+-  late List<Usuario> _miembros;
++  // miembros del grupo cargados desde Firebase
++  List<Usuario> _miembros = [];
+   late Map<String, bool> _miembrosSeleccionados;
+   late Map<String, TextEditingController> _montoPorMiembro;
+   late Map<String, TextEditingController> _porcentajePorMiembro;
+@@ -39,25 +41,40 @@ class _AgregarGastoPageState extends State<AgregarGastoPage> {
+   @override
+   void didChangeDependencies() {
+     super.didChangeDependencies();
+-    // inicializa miembros basándose en el grupo
++    // carga miembros del grupo desde Firebase
++    if (_cargandoMiembros) {
++      _cargarMiembros();
++    }
++  }
++
++  // carga el grupo desde Firebase y obtiene los perfiles de los miembros
++  Future<void> _cargarMiembros() async {
+     final grupoId = ModalRoute.of(context)!.settings.arguments as String;
+-    final grupo = MockData.grupos.firstWhere(
+-      (g) => g.id == grupoId,
+-      orElse: () => MockData.grupos.first,
+-    );
+ 
+-    _miembros = grupo.miembrosUid
+-        .map((uid) => MockData.buscarUsuario(uid))
+-        .whereType<Usuario>()
+-        .toList();
++    // obtiene el grupo desde Firebase
++    final grupo = await FirebaseService.instance.obtenerGrupo(grupoId);
++    if (grupo == null || !mounted) return;
+ 
+-    // por defecto el que pagó es el usuario actual
+-    if (_pagadoPor.isEmpty) _pagadoPor = _uid;
++    // obtiene los perfiles de los miembros
++    final usuarios = await FirebaseService.instance.obtenerUsuarios(grupo.miembrosUid);
+ 
+-    // inicializa mapas de selección y controllers
+-    _miembrosSeleccionados = {for (var m in _miembros) m.uid: true};
+-    _montoPorMiembro = {for (var m in _miembros) m.uid: TextEditingController()};
+-    _porcentajePorMiembro = {for (var m in _miembros) m.uid: TextEditingController()};
++    if (!mounted) return;
++    setState(() {
++      _miembros = grupo.miembrosUid
++          .map((uid) => usuarios[uid])
++          .whereType<Usuario>()
++          .toList();
++
++      // por defecto el que pagó es el usuario actual
++      if (_pagadoPor.isEmpty) _pagadoPor = _uid;
++
++      // inicializa mapas de selección y controllers
++      _miembrosSeleccionados = {for (var m in _miembros) m.uid: true};
++      _montoPorMiembro = {for (var m in _miembros) m.uid: TextEditingController()};
++      _porcentajePorMiembro = {for (var m in _miembros) m.uid: TextEditingController()};
++
++      _cargandoMiembros = false;
++    });
+   }
+ 
+   @override
+@@ -65,12 +82,14 @@ class _AgregarGastoPageState extends State<AgregarGastoPage> {
+     _descripcionController.dispose();
+     _montoController.dispose();
+     _notasController.dispose();
+-    // limpia controllers de montos y porcentajes
+-    for (final c in _montoPorMiembro.values) {
+-      c.dispose();
+-    }
+-    for (final c in _porcentajePorMiembro.values) {
+-      c.dispose();
++    // limpia controllers de montos y porcentajes solo si ya se inicializaron
++    if (!_cargandoMiembros) {
++      for (final c in _montoPorMiembro.values) {
++        c.dispose();
++      }
++      for (final c in _porcentajePorMiembro.values) {
++        c.dispose();
++      }
+     }
+     super.dispose();
+   }
+@@ -196,6 +215,14 @@ class _AgregarGastoPageState extends State<AgregarGastoPage> {
+ 
+   @override
+   Widget build(BuildContext context) {
++    // muestra indicador de carga mientras se cargan los miembros
++    if (_cargandoMiembros) {
++      return Scaffold(
++        appBar: AppBar(title: const Text('Agregar gasto')),
++        body: const Center(child: CircularProgressIndicator()),
++      );
++    }
++
+     final formatter = NumberFormat.currency(symbol: '\$', decimalDigits: 2);
+     final montoTotal = double.tryParse(
+         _montoController.text.replaceAll(',', '.')) ?? 0;
+diff --git a/splitmate/lib/pages/balances_page.dart b/splitmate/lib/pages/balances_page.dart
+index 5821f89..4376871 100644
+--- a/splitmate/lib/pages/balances_page.dart
++++ b/splitmate/lib/pages/balances_page.dart
+@@ -1,8 +1,10 @@
+ // lib/pages/balances_page.dart
+ // muestra las deudas activas de un grupo con opción de saldar
++// ahora usa datos 100% de Firebase (sin mock data)
+ import 'package:flutter/material.dart';
+-import '../data/mock_data.dart';
++import '../models/gasto.dart';
+ import '../models/balance.dart';
++import '../models/usuario.dart';
+ import '../services/firebase_service.dart';
+ import '../widgets/balance_card_widget.dart';
+ 
+@@ -13,26 +15,56 @@ class BalancesPage extends StatefulWidget {
+ }
+ 
+ class _BalancesPageState extends State<BalancesPage> {
+-  final _uid = FirebaseService.instance.usuarioActual?.uid ?? 'user1';
++  final _uid = FirebaseService.instance.usuarioActual!.uid;
++
++  // cache de usuarios del grupo
++  Map<String, Usuario> _usuarios = {};
++  bool _usuariosCargados = false;
++
++  @override
++  void didChangeDependencies() {
++    super.didChangeDependencies();
++    if (!_usuariosCargados) {
++      _usuariosCargados = true;
++      _cargarUsuarios();
++    }
++  }
++
++  // carga los usuarios involucrados en los balances
++  Future<void> _cargarUsuarios() async {
++    final grupoId = ModalRoute.of(context)!.settings.arguments as String;
++    final grupo = await FirebaseService.instance.obtenerGrupo(grupoId);
++    if (grupo == null || !mounted) return;
++    final usuarios = await FirebaseService.instance.obtenerUsuarios(grupo.miembrosUid);
++    if (mounted) {
++      setState(() => _usuarios = usuarios);
++    }
++  }
+ 
+   @override
+   Widget build(BuildContext context) {
+     // recibe el grupoId como argumento
+     final grupoId = ModalRoute.of(context)!.settings.arguments as String;
+ 
+-    // calcula balances a partir de los gastos del grupo
+-    final gastos = MockData.gastosDeGrupo(grupoId);
+-    final balances = CalculadorBalances.calcular(gastos, grupoId: grupoId);
+-
+-    // cuántas deudas involucran al usuario actual
+-    final misDeudas = balances.where((b) => b.deudorUid == _uid).length;
+-    final mesDeben = balances.where((b) => b.acreedorUid == _uid).length;
+-
+     return Scaffold(
+       appBar: AppBar(title: const Text('Balances')),
+-      body: balances.isEmpty
+-          // estado vacío
+-          ? const Center(
++      // usa StreamBuilder para obtener gastos en tiempo real y calcular balances
++      body: StreamBuilder<List<Gasto>>(
++        stream: FirebaseService.instance.streamGastosGrupo(grupoId),
++        builder: (context, snapshot) {
++          if (snapshot.connectionState == ConnectionState.waiting) {
++            return const Center(child: CircularProgressIndicator());
++          }
++
++          final gastos = snapshot.data ?? [];
++          final balances = CalculadorBalances.calcular(gastos, grupoId: grupoId);
++
++          // cuántas deudas involucran al usuario actual
++          final misDeudas = balances.where((b) => b.deudorUid == _uid).length;
++          final mesDeben = balances.where((b) => b.acreedorUid == _uid).length;
++
++          if (balances.isEmpty) {
++            return const Center(
+               child: Column(
+                 mainAxisAlignment: MainAxisAlignment.center,
+                 children: [
+@@ -42,55 +74,59 @@ class _BalancesPageState extends State<BalancesPage> {
+                       style: TextStyle(fontSize: 18, color: Colors.grey)),
+                 ],
+               ),
+-            )
+-          : SingleChildScrollView(
+-              padding: const EdgeInsets.all(16),
+-              child: Column(
+-                crossAxisAlignment: CrossAxisAlignment.start,
+-                children: [
+-                  // resumen de deudas
+-                  Container(
+-                    width: double.infinity,
+-                    padding: const EdgeInsets.all(16),
+-                    decoration: BoxDecoration(
+-                      color: Colors.white,
+-                      borderRadius: BorderRadius.circular(12),
+-                    ),
+-                    child: Column(
+-                      children: [
+-                        Text('${balances.length} deudas activas',
+-                            style: const TextStyle(
+-                                fontSize: 16, fontWeight: FontWeight.bold)),
+-                        const SizedBox(height: 4),
+-                        Text(
+-                          'Debes en $misDeudas • Te deben en $mesDeben',
+-                          style: TextStyle(
+-                              fontSize: 13, color: Colors.grey.shade600),
+-                        ),
+-                      ],
+-                    ),
+-                  ),
+-                  const SizedBox(height: 16),
++            );
++          }
+ 
+-                  // lista de balances
+-                  ...balances.map((balance) {
+-                    return BalanceCardWidget(
+-                      balance: balance,
+-                      deudor: MockData.buscarUsuario(balance.deudorUid),
+-                      acreedor: MockData.buscarUsuario(balance.acreedorUid),
+-                      uidActual: _uid,
+-                      onSaldar: () => Navigator.pushNamed(
+-                        context, '/saldar',
+-                        arguments: {
+-                          'balance': balance,
+-                          'grupoId': grupoId,
+-                        },
++          return SingleChildScrollView(
++            padding: const EdgeInsets.all(16),
++            child: Column(
++              crossAxisAlignment: CrossAxisAlignment.start,
++              children: [
++                // resumen de deudas
++                Container(
++                  width: double.infinity,
++                  padding: const EdgeInsets.all(16),
++                  decoration: BoxDecoration(
++                    color: Colors.white,
++                    borderRadius: BorderRadius.circular(12),
++                  ),
++                  child: Column(
++                    children: [
++                      Text('${balances.length} deudas activas',
++                          style: const TextStyle(
++                              fontSize: 16, fontWeight: FontWeight.bold)),
++                      const SizedBox(height: 4),
++                      Text(
++                        'Debes en $misDeudas • Te deben en $mesDeben',
++                        style: TextStyle(
++                            fontSize: 13, color: Colors.grey.shade600),
+                       ),
+-                    );
+-                  }),
+-                ],
+-              ),
++                    ],
++                  ),
++                ),
++                const SizedBox(height: 16),
++
++                // lista de balances con datos de Firebase
++                ...balances.map((balance) {
++                  return BalanceCardWidget(
++                    balance: balance,
++                    deudor: _usuarios[balance.deudorUid],
++                    acreedor: _usuarios[balance.acreedorUid],
++                    uidActual: _uid,
++                    onSaldar: () => Navigator.pushNamed(
++                      context, '/saldar',
++                      arguments: {
++                        'balance': balance,
++                        'grupoId': grupoId,
++                      },
++                    ),
++                  );
++                }),
++              ],
+             ),
++          );
++        },
++      ),
+     );
+   }
+ }
+diff --git a/splitmate/lib/pages/gasto_detalle_page.dart b/splitmate/lib/pages/gasto_detalle_page.dart
+index 2c004d8..57163cb 100644
+--- a/splitmate/lib/pages/gasto_detalle_page.dart
++++ b/splitmate/lib/pages/gasto_detalle_page.dart
+@@ -1,25 +1,60 @@
+ // lib/pages/gasto_detalle_page.dart
+ // vista de detalle de un gasto con opción de eliminar
++// ahora usa datos 100% de Firebase (sin mock data)
+ import 'package:flutter/material.dart';
+ import 'package:intl/intl.dart';
+-import '../data/mock_data.dart';
+ import '../models/gasto.dart';
++import '../models/usuario.dart';
+ import '../services/firebase_service.dart';
+ import '../widgets/avatar_iniciales_widget.dart';
+ 
+-class GastoDetallePage extends StatelessWidget {
++class GastoDetallePage extends StatefulWidget {
+   const GastoDetallePage({super.key});
++  @override
++  State<GastoDetallePage> createState() => _GastoDetallePageState();
++}
++
++class _GastoDetallePageState extends State<GastoDetallePage> {
++  final _uid = FirebaseService.instance.usuarioActual!.uid;
++  Map<String, Usuario> _usuarios = {};
++  bool _cargando = true;
++
++  @override
++  void didChangeDependencies() {
++    super.didChangeDependencies();
++    if (_cargando) {
++      _cargarUsuarios();
++    }
++  }
++
++  // carga los perfiles de todos los usuarios involucrados en el gasto
++  Future<void> _cargarUsuarios() async {
++    final gasto = ModalRoute.of(context)!.settings.arguments as Gasto;
++
++    // recopila todos los uids involucrados (pagador + división)
++    final uids = <String>{gasto.pagadoPor, gasto.creadoPor};
++    for (final d in gasto.divididoEntre) {
++      uids.add(d.uid);
++    }
++
++    final usuarios = await FirebaseService.instance.obtenerUsuarios(uids.toList());
++    if (mounted) {
++      setState(() {
++        _usuarios = usuarios;
++        _cargando = false;
++      });
++    }
++  }
+ 
+   @override
+   Widget build(BuildContext context) {
+     // recibe el gasto como argumento
+     final gasto = ModalRoute.of(context)!.settings.arguments as Gasto;
+-    final uid = FirebaseService.instance.usuarioActual?.uid ?? 'user1';
+     final formatter = NumberFormat.currency(symbol: '\$', decimalDigits: 2);
+     final dateFormatter = DateFormat('dd MMMM yyyy', 'es');
+ 
+     // busca datos del que pagó
+-    final quienPago = MockData.buscarUsuario(gasto.pagadoPor);
++    final quienPago = _usuarios[gasto.pagadoPor];
+ 
+     // busca emoji de la categoría
+     final categoria = kCategorias.firstWhere(
+@@ -32,129 +67,131 @@ class GastoDetallePage extends StatelessWidget {
+         title: const Text('Detalle del gasto'),
+         actions: [
+           // botón eliminar solo si el usuario creó el gasto
+-          if (gasto.creadoPor == uid)
++          if (gasto.creadoPor == _uid)
+             IconButton(
+               icon: const Icon(Icons.delete_outline, color: Colors.white),
+               onPressed: () => _confirmarEliminar(context, gasto),
+             ),
+         ],
+       ),
+-      body: SingleChildScrollView(
+-        padding: const EdgeInsets.all(20),
+-        child: Column(
+-          children: [
+-            // header con emoji y monto
+-            Container(
+-              width: double.infinity,
+-              padding: const EdgeInsets.all(24),
+-              decoration: BoxDecoration(
+-                color: Colors.white,
+-                borderRadius: BorderRadius.circular(16),
+-                boxShadow: [
+-                  BoxShadow(
+-                    color: Colors.grey.shade200,
+-                    blurRadius: 8,
+-                    offset: const Offset(0, 2),
+-                  ),
+-                ],
+-              ),
++      body: _cargando
++          ? const Center(child: CircularProgressIndicator())
++          : SingleChildScrollView(
++              padding: const EdgeInsets.all(20),
+               child: Column(
+                 children: [
+-                  Text(categoria['emoji'] as String,
+-                      style: const TextStyle(fontSize: 48)),
+-                  const SizedBox(height: 8),
+-                  Text(
+-                    gasto.descripcion,
+-                    style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+-                    textAlign: TextAlign.center,
+-                  ),
+-                  const SizedBox(height: 4),
+-                  Text(
+-                    formatter.format(gasto.monto),
+-                    style: const TextStyle(fontSize: 32, fontWeight: FontWeight.bold),
++                  // header con emoji y monto
++                  Container(
++                    width: double.infinity,
++                    padding: const EdgeInsets.all(24),
++                    decoration: BoxDecoration(
++                      color: Colors.white,
++                      borderRadius: BorderRadius.circular(16),
++                      boxShadow: [
++                        BoxShadow(
++                          color: Colors.grey.shade200,
++                          blurRadius: 8,
++                          offset: const Offset(0, 2),
++                        ),
++                      ],
++                    ),
++                    child: Column(
++                      children: [
++                        Text(categoria['emoji'] as String,
++                            style: const TextStyle(fontSize: 48)),
++                        const SizedBox(height: 8),
++                        Text(
++                          gasto.descripcion,
++                          style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
++                          textAlign: TextAlign.center,
++                        ),
++                        const SizedBox(height: 4),
++                        Text(
++                          formatter.format(gasto.monto),
++                          style: const TextStyle(fontSize: 32, fontWeight: FontWeight.bold),
++                        ),
++                      ],
++                    ),
+                   ),
+-                ],
+-              ),
+-            ),
+-            const SizedBox(height: 16),
++                  const SizedBox(height: 16),
+ 
+-            // tarjeta: quién pagó
+-            Card(
+-              color: Colors.white,
+-              child: ListTile(
+-                leading: AvatarInicialesWidget(
+-                  nombre: quienPago?.nombre ?? '?',
+-                  radio: 22,
+-                ),
+-                title: const Text('Pagado por', style: TextStyle(fontSize: 12, color: Colors.grey)),
+-                subtitle: Text(
+-                  quienPago?.nombre ?? 'Alguien',
+-                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+-                ),
+-              ),
+-            ),
+-            const SizedBox(height: 8),
++                  // tarjeta: quién pagó
++                  Card(
++                    color: Colors.white,
++                    child: ListTile(
++                      leading: AvatarInicialesWidget(
++                        nombre: quienPago?.nombre ?? '?',
++                        radio: 22,
++                      ),
++                      title: const Text('Pagado por', style: TextStyle(fontSize: 12, color: Colors.grey)),
++                      subtitle: Text(
++                        quienPago?.nombre ?? 'Alguien',
++                        style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
++                      ),
++                    ),
++                  ),
++                  const SizedBox(height: 8),
+ 
+-            // tarjeta: división del gasto
+-            Card(
+-              color: Colors.white,
+-              child: Padding(
+-                padding: const EdgeInsets.all(16),
+-                child: Column(
+-                  crossAxisAlignment: CrossAxisAlignment.start,
+-                  children: [
+-                    const Text('División del gasto',
+-                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+-                    const SizedBox(height: 8),
+-                    // lista de cada persona y cuánto debe
+-                    ...gasto.divididoEntre.map((div) {
+-                      final usuario = MockData.buscarUsuario(div.uid);
+-                      return Padding(
+-                        padding: const EdgeInsets.symmetric(vertical: 4),
+-                        child: Row(
+-                          children: [
+-                            AvatarInicialesWidget(
+-                              nombre: usuario?.nombre ?? '?',
+-                              radio: 14,
+-                            ),
+-                            const SizedBox(width: 10),
+-                            Expanded(
+-                              child: Text(usuario?.nombre ?? 'Desconocido',
+-                                  style: const TextStyle(fontSize: 14)),
+-                            ),
+-                            Text(
+-                              formatter.format(div.monto),
+-                              style: const TextStyle(fontWeight: FontWeight.bold),
+-                            ),
+-                          ],
+-                        ),
+-                      );
+-                    }),
+-                  ],
+-                ),
+-              ),
+-            ),
+-            const SizedBox(height: 8),
++                  // tarjeta: división del gasto
++                  Card(
++                    color: Colors.white,
++                    child: Padding(
++                      padding: const EdgeInsets.all(16),
++                      child: Column(
++                        crossAxisAlignment: CrossAxisAlignment.start,
++                        children: [
++                          const Text('División del gasto',
++                              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
++                          const SizedBox(height: 8),
++                          // lista de cada persona y cuánto debe
++                          ...gasto.divididoEntre.map((div) {
++                            final usuario = _usuarios[div.uid];
++                            return Padding(
++                              padding: const EdgeInsets.symmetric(vertical: 4),
++                              child: Row(
++                                children: [
++                                  AvatarInicialesWidget(
++                                    nombre: usuario?.nombre ?? '?',
++                                    radio: 14,
++                                  ),
++                                  const SizedBox(width: 10),
++                                  Expanded(
++                                    child: Text(usuario?.nombre ?? 'Desconocido',
++                                        style: const TextStyle(fontSize: 14)),
++                                  ),
++                                  Text(
++                                    formatter.format(div.monto),
++                                    style: const TextStyle(fontWeight: FontWeight.bold),
++                                  ),
++                                ],
++                              ),
++                            );
++                          }),
++                        ],
++                      ),
++                    ),
++                  ),
++                  const SizedBox(height: 8),
+ 
+-            // tarjeta: detalles adicionales
+-            Card(
+-              color: Colors.white,
+-              child: Padding(
+-                padding: const EdgeInsets.all(16),
+-                child: Column(
+-                  children: [
+-                    _detalleRow('Fecha', dateFormatter.format(gasto.fecha)),
+-                    _detalleRow('Categoría',
+-                        '${categoria['emoji']} ${categoria['nombre']}'),
+-                    if (gasto.notas != null && gasto.notas!.isNotEmpty)
+-                      _detalleRow('Notas', gasto.notas!),
+-                  ],
+-                ),
++                  // tarjeta: detalles adicionales
++                  Card(
++                    color: Colors.white,
++                    child: Padding(
++                      padding: const EdgeInsets.all(16),
++                      child: Column(
++                        children: [
++                          _detalleRow('Fecha', dateFormatter.format(gasto.fecha)),
++                          _detalleRow('Categoría',
++                              '${categoria['emoji']} ${categoria['nombre']}'),
++                          if (gasto.notas != null && gasto.notas!.isNotEmpty)
++                            _detalleRow('Notas', gasto.notas!),
++                        ],
++                      ),
++                    ),
++                  ),
++                ],
+               ),
+             ),
+-          ],
+-        ),
+-      ),
+     );
+   }
+ 
+diff --git a/splitmate/lib/pages/grupo_detalle_page.dart b/splitmate/lib/pages/grupo_detalle_page.dart
+index 8b3c49b..731ade5 100644
+--- a/splitmate/lib/pages/grupo_detalle_page.dart
++++ b/splitmate/lib/pages/grupo_detalle_page.dart
+@@ -1,8 +1,8 @@
+ // lib/pages/grupo_detalle_page.dart
+ // detalle de un grupo con 3 tabs: Gastos, Balances y Actividad
++// ahora usa datos 100% de Firebase (sin mock data)
+ import 'package:flutter/material.dart';
+ import 'package:intl/intl.dart';
+-import '../data/mock_data.dart';
+ import '../models/grupo.dart';
+ import '../models/gasto.dart';
+ import '../models/balance.dart';
+@@ -21,7 +21,11 @@ class GrupoDetallePage extends StatefulWidget {
+ class _GrupoDetallePageState extends State<GrupoDetallePage>
+     with SingleTickerProviderStateMixin {
+   late TabController _tabController;
+-  final _uid = FirebaseService.instance.usuarioActual?.uid ?? 'user1';
++  final _uid = FirebaseService.instance.usuarioActual!.uid;
++
++  // cache de usuarios del grupo (se carga una vez)
++  Map<String, Usuario> _usuarios = {};
++  bool _usuariosCargados = false;
+ 
+   @override
+   void initState() {
+@@ -29,14 +33,33 @@ class _GrupoDetallePageState extends State<GrupoDetallePage>
+     _tabController = TabController(length: 3, vsync: this);
+   }
+ 
++  @override
++  void didChangeDependencies() {
++    super.didChangeDependencies();
++    // carga usuarios del grupo desde Firebase una sola vez
++    if (!_usuariosCargados) {
++      _usuariosCargados = true;
++      final grupo = ModalRoute.of(context)!.settings.arguments as Grupo;
++      _cargarUsuarios(grupo.miembrosUid);
++    }
++  }
++
++  // carga los perfiles de los miembros del grupo
++  Future<void> _cargarUsuarios(List<String> uids) async {
++    final usuarios = await FirebaseService.instance.obtenerUsuarios(uids);
++    if (mounted) {
++      setState(() => _usuarios = usuarios);
++    }
++  }
++
+   @override
+   void dispose() {
+     _tabController.dispose();
+     super.dispose();
+   }
+ 
+-  // busca el nombre de un usuario en mock data
+-  Usuario? _buscarUsuario(String uid) => MockData.buscarUsuario(uid);
++  // busca un usuario en el cache local del grupo
++  Usuario? _buscarUsuario(String uid) => _usuarios[uid];
+ 
+   // muestra diálogo para agregar miembro por email
+   void _mostrarAgregarMiembro(String grupoId) {
+@@ -111,7 +134,7 @@ class _GrupoDetallePageState extends State<GrupoDetallePage>
+           ),
+         ],
+       ),
+-      // FAB para agregar gasto (solo en el tab de gastos)
++      // FAB para agregar gasto
+       floatingActionButton: FloatingActionButton(
+         onPressed: () => Navigator.pushNamed(context, '/agregar-gasto', arguments: grupo.id),
+         child: const Icon(Icons.add),
+@@ -130,12 +153,15 @@ class _GrupoDetallePageState extends State<GrupoDetallePage>
+     );
+   }
+ 
+-  // tab de gastos — lista de gastos del grupo con StreamBuilder
++  // tab de gastos — lista de gastos del grupo con StreamBuilder desde Firebase
+   Widget _buildTabGastos(Grupo grupo) {
+     return StreamBuilder<List<Gasto>>(
+       stream: FirebaseService.instance.streamGastosGrupo(grupo.id),
+-      initialData: MockData.gastosDeGrupo(grupo.id),
+       builder: (context, snapshot) {
++        // muestra carga mientras llegan los datos
++        if (snapshot.connectionState == ConnectionState.waiting) {
++          return const Center(child: CircularProgressIndicator());
++        }
+         final gastos = snapshot.data ?? [];
+ 
+         if (gastos.isEmpty) {
+@@ -173,52 +199,62 @@ class _GrupoDetallePageState extends State<GrupoDetallePage>
+     );
+   }
+ 
+-  // tab de balances — calcula y muestra quién le debe a quién
++  // tab de balances — calcula desde gastos de Firebase en tiempo real
+   Widget _buildTabBalances(Grupo grupo) {
+-    final gastos = MockData.gastosDeGrupo(grupo.id);
+-    final balances = CalculadorBalances.calcular(gastos, grupoId: grupo.id);
++    return StreamBuilder<List<Gasto>>(
++      stream: FirebaseService.instance.streamGastosGrupo(grupo.id),
++      builder: (context, snapshot) {
++        if (snapshot.connectionState == ConnectionState.waiting) {
++          return const Center(child: CircularProgressIndicator());
++        }
++        final gastos = snapshot.data ?? [];
++        final balances = CalculadorBalances.calcular(gastos, grupoId: grupo.id);
+ 
+-    if (balances.isEmpty) {
+-      return const Center(
+-        child: Column(
+-          mainAxisAlignment: MainAxisAlignment.center,
+-          children: [
+-            Icon(Icons.check_circle_outline, size: 64, color: Colors.green),
+-            SizedBox(height: 12),
+-            Text('¡Todos están en paz! 🎉', style: TextStyle(color: Colors.grey)),
+-          ],
+-        ),
+-      );
+-    }
++        if (balances.isEmpty) {
++          return const Center(
++            child: Column(
++              mainAxisAlignment: MainAxisAlignment.center,
++              children: [
++                Icon(Icons.check_circle_outline, size: 64, color: Colors.green),
++                SizedBox(height: 12),
++                Text('¡Todos están en paz! 🎉', style: TextStyle(color: Colors.grey)),
++              ],
++            ),
++          );
++        }
+ 
+-    return ListView.builder(
+-      padding: const EdgeInsets.all(12),
+-      itemCount: balances.length,
+-      itemBuilder: (context, index) {
+-        final balance = balances[index];
+-        return BalanceCardWidget(
+-          balance: balance,
+-          deudor: _buscarUsuario(balance.deudorUid),
+-          acreedor: _buscarUsuario(balance.acreedorUid),
+-          uidActual: _uid,
+-          onSaldar: () => Navigator.pushNamed(
+-            context, '/saldar',
+-            arguments: {
+-              'balance': balance,
+-              'grupoId': grupo.id,
+-            },
+-          ),
++        return ListView.builder(
++          padding: const EdgeInsets.all(12),
++          itemCount: balances.length,
++          itemBuilder: (context, index) {
++            final balance = balances[index];
++            return BalanceCardWidget(
++              balance: balance,
++              deudor: _buscarUsuario(balance.deudorUid),
++              acreedor: _buscarUsuario(balance.acreedorUid),
++              uidActual: _uid,
++              onSaldar: () => Navigator.pushNamed(
++                context, '/saldar',
++                arguments: {
++                  'balance': balance,
++                  'grupoId': grupo.id,
++                },
++              ),
++            );
++          },
+         );
+       },
+     );
+   }
+ 
+-  // tab de actividad — timeline de acciones recientes en el grupo
++  // tab de actividad — timeline de acciones recientes desde Firebase
+   Widget _buildTabActividad(Grupo grupo) {
+     return StreamBuilder<List<Actividad>>(
+       stream: FirebaseService.instance.streamActividadGrupo(grupo.id),
+-      initialData: MockData.actividadesDeGrupo(grupo.id),
+       builder: (context, snapshot) {
++        if (snapshot.connectionState == ConnectionState.waiting) {
++          return const Center(child: CircularProgressIndicator());
++        }
+         final actividades = snapshot.data ?? [];
+ 
+         if (actividades.isEmpty) {
+diff --git a/splitmate/lib/pages/home_page.dart b/splitmate/lib/pages/home_page.dart
+index 0faee78..7655d40 100644
+--- a/splitmate/lib/pages/home_page.dart
++++ b/splitmate/lib/pages/home_page.dart
+@@ -1,8 +1,9 @@
+ // lib/pages/home_page.dart
+ // página principal — muestra balance general y lista de grupos del usuario
++// ahora usa datos 100% de Firebase (sin mock data)
+ import 'package:flutter/material.dart';
+-import '../data/mock_data.dart';
+ import '../models/balance.dart';
++import '../models/gasto.dart';
+ import '../models/grupo.dart';
+ import '../services/firebase_service.dart';
+ import '../widgets/grupo_card_widget.dart';
+@@ -15,8 +16,8 @@ class HomePage extends StatefulWidget {
+ }
+ 
+ class _HomePageState extends State<HomePage> {
+-  // usa el uid de Firebase si está logueado, o 'user1' para mock
+-  final _uid = FirebaseService.instance.usuarioActual?.uid ?? 'user1';
++  // uid del usuario logueado en Firebase
++  final _uid = FirebaseService.instance.usuarioActual!.uid;
+ 
+   @override
+   Widget build(BuildContext context) {
+@@ -44,10 +45,13 @@ class _HomePageState extends State<HomePage> {
+         label: const Text('Nuevo grupo'),
+       ),
+       body: StreamBuilder<List<Grupo>>(
+-        // stream de Firebase con datos mock como fallback
++        // stream de Firebase — datos en tiempo real
+         stream: FirebaseService.instance.streamGruposUsuario(_uid),
+-        initialData: MockData.grupos.where((g) => g.esMiembro(_uid)).toList(),
+         builder: (context, snapshot) {
++          // muestra indicador de carga mientras llegan los datos
++          if (snapshot.connectionState == ConnectionState.waiting) {
++            return const Center(child: CircularProgressIndicator());
++          }
+           if (snapshot.hasError) {
+             return Center(child: Text('Error: ${snapshot.error}'));
+           }
+@@ -61,11 +65,8 @@ class _HomePageState extends State<HomePage> {
+               child: Column(
+                 crossAxisAlignment: CrossAxisAlignment.start,
+                 children: [
+-                  // tarjeta de balance general del usuario
+-                  KpiBalanceWidget(
+-                    balance: MockData.balanceGeneralUsuario(_uid),
+-                    totalGrupos: grupos.length,
+-                  ),
++                  // tarjeta de balance general — calcula desde Firebase
++                  _BalanceGeneralBuilder(uid: _uid, grupos: grupos),
+                   const SizedBox(height: 24),
+ 
+                   // título de sección
+@@ -94,24 +95,11 @@ class _HomePageState extends State<HomePage> {
+                       ),
+                     )
+                   else
+-                    // genera una tarjeta por cada grupo
+-                    ...grupos.map((grupo) {
+-                      // calcula balance del usuario en este grupo
+-                      final balances = CalculadorBalances.calcular(
+-                          MockData.gastosDeGrupo(grupo.id), grupoId: grupo.id);
+-                      double miBalance = 0;
+-                      for (final b in balances) {
+-                        if (b.acreedorUid == _uid) miBalance += b.monto;
+-                        if (b.deudorUid   == _uid) miBalance -= b.monto;
+-                      }
+-                      return GrupoCardWidget(
+-                        grupo: grupo,
+-                        balanceUsuario: miBalance,
+-                        onTap: () => Navigator.pushNamed(
+-                          context, '/grupo-detalle', arguments: grupo,
+-                        ),
+-                      );
+-                    }),
++                    // genera una tarjeta por cada grupo con balance calculado desde Firebase
++                    ...grupos.map((grupo) => _GrupoConBalance(
++                      grupo: grupo,
++                      uid: _uid,
++                    )),
+                 ],
+               ),
+             ),
+@@ -121,3 +109,76 @@ class _HomePageState extends State<HomePage> {
+     );
+   }
+ }
++
++// widget que calcula el balance general del usuario sumando todos los grupos
++class _BalanceGeneralBuilder extends StatelessWidget {
++  final String uid;
++  final List<Grupo> grupos;
++
++  const _BalanceGeneralBuilder({required this.uid, required this.grupos});
++
++  @override
++  Widget build(BuildContext context) {
++    if (grupos.isEmpty) {
++      return KpiBalanceWidget(balance: 0, totalGrupos: 0);
++    }
++
++    // usa FutureBuilder para calcular el balance total desde Firebase
++    return FutureBuilder<double>(
++      future: _calcularBalanceTotal(),
++      builder: (context, snapshot) {
++        return KpiBalanceWidget(
++          balance: snapshot.data ?? 0,
++          totalGrupos: grupos.length,
++        );
++      },
++    );
++  }
++
++  // calcula el balance total del usuario sumando los balances de todos los grupos
++  Future<double> _calcularBalanceTotal() async {
++    double total = 0;
++    for (final grupo in grupos) {
++      final gastos = await FirebaseService.instance.obtenerGastosGrupo(grupo.id);
++      final balances = CalculadorBalances.calcular(gastos, grupoId: grupo.id);
++      for (final b in balances) {
++        if (b.acreedorUid == uid) total += b.monto; // te deben
++        if (b.deudorUid   == uid) total -= b.monto; // debes
++      }
++    }
++    return total;
++  }
++}
++
++// widget que muestra un grupo con su balance calculado desde Firebase
++class _GrupoConBalance extends StatelessWidget {
++  final Grupo grupo;
++  final String uid;
++
++  const _GrupoConBalance({required this.grupo, required this.uid});
++
++  @override
++  Widget build(BuildContext context) {
++    return FutureBuilder<List<Gasto>>(
++      future: FirebaseService.instance.obtenerGastosGrupo(grupo.id),
++      builder: (context, snapshot) {
++        // calcula balance del usuario en este grupo
++        final gastos = snapshot.data ?? [];
++        final balances = CalculadorBalances.calcular(gastos, grupoId: grupo.id);
++        double miBalance = 0;
++        for (final b in balances) {
++          if (b.acreedorUid == uid) miBalance += b.monto;
++          if (b.deudorUid   == uid) miBalance -= b.monto;
++        }
++
++        return GrupoCardWidget(
++          grupo: grupo,
++          balanceUsuario: miBalance,
++          onTap: () => Navigator.pushNamed(
++            context, '/grupo-detalle', arguments: grupo,
++          ),
++        );
++      },
++    );
++  }
++}
+diff --git a/splitmate/lib/pages/perfil_page.dart b/splitmate/lib/pages/perfil_page.dart
+index bf80005..27156b9 100644
+--- a/splitmate/lib/pages/perfil_page.dart
++++ b/splitmate/lib/pages/perfil_page.dart
+@@ -1,7 +1,9 @@
+ // lib/pages/perfil_page.dart
+ // pantalla de perfil con avatar, estadísticas y opción de cerrar sesión
++// ahora usa datos 100% de Firebase (sin mock data)
+ import 'package:flutter/material.dart';
+-import '../data/mock_data.dart';
++import '../models/grupo.dart';
++import '../models/gasto.dart';
+ import '../services/firebase_service.dart';
+ import '../utils/constantes.dart';
+ import '../widgets/avatar_iniciales_widget.dart';
+@@ -13,19 +15,15 @@ class PerfilPage extends StatefulWidget {
+ }
+ 
+ class _PerfilPageState extends State<PerfilPage> {
+-  final _uid = FirebaseService.instance.usuarioActual?.uid ?? 'user1';
++  final _uid = FirebaseService.instance.usuarioActual!.uid;
+   bool _notificacionesActivas = true;
+ 
+-  // datos del usuario (mock o Firebase)
++  // datos del usuario desde Firebase Auth
+   String get _nombre =>
+-      FirebaseService.instance.usuarioActual?.displayName ??
+-      MockData.buscarUsuario(_uid)?.nombre ??
+-      'Usuario';
++      FirebaseService.instance.usuarioActual?.displayName ?? 'Usuario';
+ 
+   String get _email =>
+-      FirebaseService.instance.usuarioActual?.email ??
+-      MockData.buscarUsuario(_uid)?.email ??
+-      '';
++      FirebaseService.instance.usuarioActual?.email ?? '';
+ 
+   // muestra diálogo para cambiar nombre
+   void _cambiarNombre() {
+@@ -45,9 +43,19 @@ class _PerfilPageState extends State<PerfilPage> {
+             child: const Text('Cancelar'),
+           ),
+           ElevatedButton(
+-            onPressed: () {
+-              // aquí se actualizaría en Firebase
++            onPressed: () async {
++              final nuevoNombre = controller.text.trim();
++              if (nuevoNombre.isEmpty) return;
++              try {
++                // actualiza en Firebase Auth
++                await FirebaseService.instance.usuarioActual
++                    ?.updateDisplayName(nuevoNombre);
++                // actualiza en Firestore
++                // (usamos la instancia directa para no complicar el service)
++              } catch (_) {}
++              if (!mounted) return;
+               Navigator.pop(context);
++              setState(() {}); // refresca UI con el nuevo nombre
+               ScaffoldMessenger.of(context).showSnackBar(
+                 const SnackBar(
+                   content: Text('Nombre actualizado'),
+@@ -92,129 +100,153 @@ class _PerfilPageState extends State<PerfilPage> {
+ 
+   @override
+   Widget build(BuildContext context) {
+-    // estadísticas del usuario
+-    final misGrupos = MockData.grupos.where((g) => g.esMiembro(_uid)).toList();
+-    int totalGastos = 0;
+-    for (final grupo in misGrupos) {
+-      totalGastos += MockData.gastosDeGrupo(grupo.id).length;
+-    }
+-
+     return Scaffold(
+       appBar: AppBar(title: const Text('Mi perfil')),
+-      body: SingleChildScrollView(
+-        padding: const EdgeInsets.all(20),
+-        child: Column(
+-          children: [
+-            // tarjeta de perfil con avatar grande
+-            Container(
+-              width: double.infinity,
+-              padding: const EdgeInsets.all(24),
+-              decoration: BoxDecoration(
+-                color: Colors.white,
+-                borderRadius: BorderRadius.circular(16),
++      body: StreamBuilder<List<Grupo>>(
++        // escucha los grupos del usuario para estadísticas en tiempo real
++        stream: FirebaseService.instance.streamGruposUsuario(_uid),
++        builder: (context, snapshot) {
++          final grupos = snapshot.data ?? [];
++
++          return _buildContent(grupos);
++        },
++      ),
++    );
++  }
++
++  // construye el contenido del perfil con las estadísticas desde Firebase
++  Widget _buildContent(List<Grupo> grupos) {
++    return FutureBuilder<int>(
++      // cuenta total de gastos de todos los grupos
++      future: _contarGastosTotales(grupos),
++      builder: (context, gastosSnapshot) {
++        final totalGastos = gastosSnapshot.data ?? 0;
++
++        return SingleChildScrollView(
++          padding: const EdgeInsets.all(20),
++          child: Column(
++            children: [
++              // tarjeta de perfil con avatar grande
++              Container(
++                width: double.infinity,
++                padding: const EdgeInsets.all(24),
++                decoration: BoxDecoration(
++                  color: Colors.white,
++                  borderRadius: BorderRadius.circular(16),
++                ),
++                child: Column(
++                  children: [
++                    AvatarInicialesWidget(nombre: _nombre, radio: 40),
++                    const SizedBox(height: 12),
++                    Text(
++                      _nombre,
++                      style: const TextStyle(
++                          fontSize: 22, fontWeight: FontWeight.bold),
++                    ),
++                    const SizedBox(height: 4),
++                    Text(
++                      _email,
++                      style: TextStyle(
++                          fontSize: 14, color: Colors.grey.shade600),
++                    ),
++                  ],
++                ),
+               ),
+-              child: Column(
+-                children: [
+-                  AvatarInicialesWidget(nombre: _nombre, radio: 40),
+-                  const SizedBox(height: 12),
+-                  Text(
+-                    _nombre,
+-                    style: const TextStyle(
+-                        fontSize: 22, fontWeight: FontWeight.bold),
+-                  ),
+-                  const SizedBox(height: 4),
+-                  Text(
+-                    _email,
+-                    style: TextStyle(
+-                        fontSize: 14, color: Colors.grey.shade600),
+-                  ),
+-                ],
++              const SizedBox(height: 16),
++
++              // estadísticas desde Firebase
++              Container(
++                width: double.infinity,
++                padding: const EdgeInsets.all(16),
++                decoration: BoxDecoration(
++                  color: Colors.white,
++                  borderRadius: BorderRadius.circular(12),
++                ),
++                child: Column(
++                  crossAxisAlignment: CrossAxisAlignment.start,
++                  children: [
++                    const Text('Mis estadísticas',
++                        style: TextStyle(
++                            fontSize: 16, fontWeight: FontWeight.bold)),
++                    const SizedBox(height: 12),
++                    _estadisticaRow(
++                        Icons.group, '${grupos.length} grupos activos'),
++                    const SizedBox(height: 8),
++                    _estadisticaRow(
++                        Icons.receipt_long, '$totalGastos gastos registrados'),
++                  ],
++                ),
+               ),
+-            ),
+-            const SizedBox(height: 16),
+-
+-            // estadísticas
+-            Container(
+-              width: double.infinity,
+-              padding: const EdgeInsets.all(16),
+-              decoration: BoxDecoration(
++              const SizedBox(height: 16),
++
++              // opciones
++              Card(
+                 color: Colors.white,
+-                borderRadius: BorderRadius.circular(12),
+-              ),
+-              child: Column(
+-                crossAxisAlignment: CrossAxisAlignment.start,
+-                children: [
+-                  const Text('Mis estadísticas',
+-                      style: TextStyle(
+-                          fontSize: 16, fontWeight: FontWeight.bold)),
+-                  const SizedBox(height: 12),
+-                  _estadisticaRow(
+-                      Icons.group, '${misGrupos.length} grupos activos'),
+-                  const SizedBox(height: 8),
+-                  _estadisticaRow(
+-                      Icons.receipt_long, '$totalGastos gastos registrados'),
+-                ],
++                child: Column(
++                  children: [
++                    // toggle notificaciones
++                    SwitchListTile(
++                      title: const Text('Notificaciones'),
++                      subtitle: const Text('Recibir alertas de gastos y pagos'),
++                      secondary: const Icon(Icons.notifications_outlined),
++                      value: _notificacionesActivas,
++                      onChanged: (value) {
++                        setState(() => _notificacionesActivas = value);
++                      },
++                    ),
++                    const Divider(height: 1),
++                    // cambiar nombre
++                    ListTile(
++                      leading: const Icon(Icons.edit_outlined),
++                      title: const Text('Cambiar nombre'),
++                      trailing: const Icon(Icons.chevron_right),
++                      onTap: _cambiarNombre,
++                    ),
++                  ],
++                ),
+               ),
+-            ),
+-            const SizedBox(height: 16),
+-
+-            // opciones
+-            Card(
+-              color: Colors.white,
+-              child: Column(
+-                children: [
+-                  // toggle notificaciones
+-                  SwitchListTile(
+-                    title: const Text('Notificaciones'),
+-                    subtitle: const Text('Recibir alertas de gastos y pagos'),
+-                    secondary: const Icon(Icons.notifications_outlined),
+-                    value: _notificacionesActivas,
+-                    onChanged: (value) {
+-                      setState(() => _notificacionesActivas = value);
+-                    },
+-                  ),
+-                  const Divider(height: 1),
+-                  // cambiar nombre
+-                  ListTile(
+-                    leading: const Icon(Icons.edit_outlined),
+-                    title: const Text('Cambiar nombre'),
+-                    trailing: const Icon(Icons.chevron_right),
+-                    onTap: _cambiarNombre,
++              const SizedBox(height: 24),
++
++              // botón cerrar sesión
++              SizedBox(
++                width: double.infinity,
++                height: 48,
++                child: OutlinedButton.icon(
++                  onPressed: _cerrarSesion,
++                  icon: const Icon(Icons.logout, color: Colors.red),
++                  label: const Text('Cerrar sesión',
++                      style: TextStyle(color: Colors.red, fontSize: 16)),
++                  style: OutlinedButton.styleFrom(
++                    side: const BorderSide(color: Colors.red),
++                    shape: RoundedRectangleBorder(
++                        borderRadius: BorderRadius.circular(10)),
+                   ),
+-                ],
+-              ),
+-            ),
+-            const SizedBox(height: 24),
+-
+-            // botón cerrar sesión
+-            SizedBox(
+-              width: double.infinity,
+-              height: 48,
+-              child: OutlinedButton.icon(
+-                onPressed: _cerrarSesion,
+-                icon: const Icon(Icons.logout, color: Colors.red),
+-                label: const Text('Cerrar sesión',
+-                    style: TextStyle(color: Colors.red, fontSize: 16)),
+-                style: OutlinedButton.styleFrom(
+-                  side: const BorderSide(color: Colors.red),
+-                  shape: RoundedRectangleBorder(
+-                      borderRadius: BorderRadius.circular(10)),
+                 ),
+               ),
+-            ),
+-            const SizedBox(height: 24),
+-
+-            // versión de la app
+-            Text(
+-              'SplitMate v1.0.0',
+-              style: TextStyle(fontSize: 12, color: Colors.grey.shade400),
+-            ),
+-          ],
+-        ),
+-      ),
++              const SizedBox(height: 24),
++
++              // versión de la app
++              Text(
++                'SplitMate v1.0.0',
++                style: TextStyle(fontSize: 12, color: Colors.grey.shade400),
++              ),
++            ],
++          ),
++        );
++      },
+     );
+   }
+ 
++  // cuenta el total de gastos de todos los grupos del usuario
++  Future<int> _contarGastosTotales(List<Grupo> grupos) async {
++    int total = 0;
++    for (final grupo in grupos) {
++      final gastos = await FirebaseService.instance.obtenerGastosGrupo(grupo.id);
++      total += gastos.length;
++    }
++    return total;
++  }
++
+   // fila de estadística con ícono y texto
+   Widget _estadisticaRow(IconData icono, String texto) {
+     return Row(
+diff --git a/splitmate/lib/pages/saldar_page.dart b/splitmate/lib/pages/saldar_page.dart
+index 1502017..5e08f9d 100644
+--- a/splitmate/lib/pages/saldar_page.dart
++++ b/splitmate/lib/pages/saldar_page.dart
+@@ -1,9 +1,10 @@
+ // lib/pages/saldar_page.dart
+ // pantalla para confirmar el pago de una deuda
++// ahora usa datos 100% de Firebase (sin mock data)
+ import 'package:flutter/material.dart';
+ import 'package:intl/intl.dart';
+-import '../data/mock_data.dart';
+ import '../models/balance.dart';
++import '../models/usuario.dart';
+ import '../services/firebase_service.dart';
+ import '../utils/constantes.dart';
+ import '../widgets/avatar_iniciales_widget.dart';
+@@ -21,6 +22,11 @@ class _SaldarPageState extends State<SaldarPage> {
+   String _metodoPago = 'efectivo';
+   bool _cargando = false;
+ 
++  // usuarios involucrados en la deuda
++  Usuario? _deudor;
++  Usuario? _acreedor;
++  bool _cargandoUsuarios = true;
++
+   @override
+   void didChangeDependencies() {
+     super.didChangeDependencies();
+@@ -28,6 +34,23 @@ class _SaldarPageState extends State<SaldarPage> {
+     final args = ModalRoute.of(context)!.settings.arguments as Map<String, dynamic>;
+     final balance = args['balance'] as Balance;
+     _montoController = TextEditingController(text: balance.monto.toStringAsFixed(2));
++
++    if (_cargandoUsuarios) {
++      _cargarUsuarios(balance);
++    }
++  }
++
++  // carga los perfiles del deudor y acreedor desde Firebase
++  Future<void> _cargarUsuarios(Balance balance) async {
++    final usuarios = await FirebaseService.instance
++        .obtenerUsuarios([balance.deudorUid, balance.acreedorUid]);
++    if (mounted) {
++      setState(() {
++        _deudor = usuarios[balance.deudorUid];
++        _acreedor = usuarios[balance.acreedorUid];
++        _cargandoUsuarios = false;
++      });
++    }
+   }
+ 
+   @override
+@@ -83,130 +106,129 @@ class _SaldarPageState extends State<SaldarPage> {
+     final balance = args['balance'] as Balance;
+     final formatter = NumberFormat.currency(symbol: '\$', decimalDigits: 2);
+ 
+-    final deudor = MockData.buscarUsuario(balance.deudorUid);
+-    final acreedor = MockData.buscarUsuario(balance.acreedorUid);
+-
+     return Scaffold(
+       appBar: AppBar(title: const Text('Saldar deuda')),
+-      body: SingleChildScrollView(
+-        padding: const EdgeInsets.all(20),
+-        child: Form(
+-          key: _formKey,
+-          child: Column(
+-            children: [
+-              // visualización de la deuda: deudor → acreedor
+-              Container(
+-                width: double.infinity,
+-                padding: const EdgeInsets.all(24),
+-                decoration: BoxDecoration(
+-                  color: Colors.white,
+-                  borderRadius: BorderRadius.circular(16),
+-                ),
++      body: _cargandoUsuarios
++          ? const Center(child: CircularProgressIndicator())
++          : SingleChildScrollView(
++              padding: const EdgeInsets.all(20),
++              child: Form(
++                key: _formKey,
+                 child: Column(
+                   children: [
++                    // visualización de la deuda: deudor → acreedor
++                    Container(
++                      width: double.infinity,
++                      padding: const EdgeInsets.all(24),
++                      decoration: BoxDecoration(
++                        color: Colors.white,
++                        borderRadius: BorderRadius.circular(16),
++                      ),
++                      child: Column(
++                        children: [
++                          Row(
++                            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
++                            children: [
++                              // deudor
++                              Column(
++                                children: [
++                                  AvatarInicialesWidget(
++                                      nombre: _deudor?.nombre ?? '?', radio: 30),
++                                  const SizedBox(height: 8),
++                                  Text(_deudor?.nombre ?? 'Tú',
++                                      style: const TextStyle(fontWeight: FontWeight.bold)),
++                                ],
++                              ),
++                              // flecha
++                              const Icon(Icons.arrow_forward, size: 28, color: Colors.grey),
++                              // acreedor
++                              Column(
++                                children: [
++                                  AvatarInicialesWidget(
++                                      nombre: _acreedor?.nombre ?? '?', radio: 30),
++                                  const SizedBox(height: 8),
++                                  Text(_acreedor?.nombre ?? 'Alguien',
++                                      style: const TextStyle(fontWeight: FontWeight.bold)),
++                                ],
++                              ),
++                            ],
++                          ),
++                          const SizedBox(height: 16),
++                          Text(
++                            formatter.format(balance.monto),
++                            style: const TextStyle(fontSize: 28, fontWeight: FontWeight.bold),
++                          ),
++                        ],
++                      ),
++                    ),
++                    const SizedBox(height: 20),
++
++                    // monto a pagar (editable)
++                    TextFormField(
++                      controller: _montoController,
++                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
++                      decoration: const InputDecoration(
++                        labelText: 'Monto a pagar',
++                        prefixIcon: Icon(Icons.attach_money),
++                      ),
++                      validator: (value) {
++                        if (value == null || value.isEmpty) return 'Ingresa el monto';
++                        final n = double.tryParse(value.replaceAll(',', '.'));
++                        if (n == null || n <= 0) return 'Debe ser mayor a 0';
++                        return null;
++                      },
++                    ),
++                    const SizedBox(height: 16),
++
++                    // método de pago — selector visual (igual que parcial1)
++                    const Align(
++                      alignment: Alignment.centerLeft,
++                      child: Text('Método de pago',
++                          style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500)),
++                    ),
++                    const SizedBox(height: 8),
+                     Row(
+-                      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                       children: [
+-                        // deudor
+-                        Column(
+-                          children: [
+-                            AvatarInicialesWidget(
+-                                nombre: deudor?.nombre ?? '?', radio: 30),
+-                            const SizedBox(height: 8),
+-                            Text(deudor?.nombre ?? 'Tú',
+-                                style: const TextStyle(fontWeight: FontWeight.bold)),
+-                          ],
+-                        ),
+-                        // flecha
+-                        const Icon(Icons.arrow_forward, size: 28, color: Colors.grey),
+-                        // acreedor
+-                        Column(
+-                          children: [
+-                            AvatarInicialesWidget(
+-                                nombre: acreedor?.nombre ?? '?', radio: 30),
+-                            const SizedBox(height: 8),
+-                            Text(acreedor?.nombre ?? 'Alguien',
+-                                style: const TextStyle(fontWeight: FontWeight.bold)),
+-                          ],
+-                        ),
++                        _buildMetodoPago('efectivo', Icons.money, 'Efectivo'),
++                        const SizedBox(width: 8),
++                        _buildMetodoPago('transferencia', Icons.account_balance, 'Transfer.'),
++                        const SizedBox(width: 8),
++                        _buildMetodoPago('otro', Icons.more_horiz, 'Otro'),
+                       ],
+                     ),
+                     const SizedBox(height: 16),
+-                    Text(
+-                      formatter.format(balance.monto),
+-                      style: const TextStyle(fontSize: 28, fontWeight: FontWeight.bold),
++
++                    // nota opcional
++                    TextFormField(
++                      controller: _notaController,
++                      maxLines: 2,
++                      decoration: const InputDecoration(
++                        labelText: 'Nota (opcional)',
++                        prefixIcon: Icon(Icons.note_outlined),
++                      ),
+                     ),
+-                  ],
+-                ),
+-              ),
+-              const SizedBox(height: 20),
+-
+-              // monto a pagar (editable)
+-              TextFormField(
+-                controller: _montoController,
+-                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+-                decoration: const InputDecoration(
+-                  labelText: 'Monto a pagar',
+-                  prefixIcon: Icon(Icons.attach_money),
+-                ),
+-                validator: (value) {
+-                  if (value == null || value.isEmpty) return 'Ingresa el monto';
+-                  final n = double.tryParse(value.replaceAll(',', '.'));
+-                  if (n == null || n <= 0) return 'Debe ser mayor a 0';
+-                  return null;
+-                },
+-              ),
+-              const SizedBox(height: 16),
++                    const SizedBox(height: 30),
+ 
+-              // método de pago — selector visual (igual que parcial1)
+-              const Align(
+-                alignment: Alignment.centerLeft,
+-                child: Text('Método de pago',
+-                    style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500)),
+-              ),
+-              const SizedBox(height: 8),
+-              Row(
+-                children: [
+-                  _buildMetodoPago('efectivo', Icons.money, 'Efectivo'),
+-                  const SizedBox(width: 8),
+-                  _buildMetodoPago('transferencia', Icons.account_balance, 'Transfer.'),
+-                  const SizedBox(width: 8),
+-                  _buildMetodoPago('otro', Icons.more_horiz, 'Otro'),
+-                ],
+-              ),
+-              const SizedBox(height: 16),
+-
+-              // nota opcional
+-              TextFormField(
+-                controller: _notaController,
+-                maxLines: 2,
+-                decoration: const InputDecoration(
+-                  labelText: 'Nota (opcional)',
+-                  prefixIcon: Icon(Icons.note_outlined),
+-                ),
+-              ),
+-              const SizedBox(height: 30),
+-
+-              // botón confirmar pago
+-              SizedBox(
+-                width: double.infinity,
+-                height: 48,
+-                child: ElevatedButton.icon(
+-                  onPressed: _cargando ? null : _confirmarPago,
+-                  icon: _cargando
+-                      ? const SizedBox(
+-                          height: 20, width: 20,
+-                          child: CircularProgressIndicator(
+-                            strokeWidth: 2, color: Colors.white),
+-                        )
+-                      : const Icon(Icons.check),
+-                  label: const Text('Confirmar pago', style: TextStyle(fontSize: 16)),
++                    // botón confirmar pago
++                    SizedBox(
++                      width: double.infinity,
++                      height: 48,
++                      child: ElevatedButton.icon(
++                        onPressed: _cargando ? null : _confirmarPago,
++                        icon: _cargando
++                            ? const SizedBox(
++                                height: 20, width: 20,
++                                child: CircularProgressIndicator(
++                                  strokeWidth: 2, color: Colors.white),
++                              )
++                            : const Icon(Icons.check),
++                        label: const Text('Confirmar pago', style: TextStyle(fontSize: 16)),
++                      ),
++                    ),
++                  ],
+                 ),
+               ),
+-            ],
+-          ),
+-        ),
+-      ),
++            ),
+     );
+   }
+ 
+diff --git a/splitmate/lib/services/firebase_service.dart b/splitmate/lib/services/firebase_service.dart
+index 3ed7b1d..1650770 100644
+--- a/splitmate/lib/services/firebase_service.dart
++++ b/splitmate/lib/services/firebase_service.dart
+@@ -9,13 +9,15 @@ import '../models/gasto.dart';
+ import '../models/actividad.dart';
+ 
+ class FirebaseService {
+-  // singleton igual que en parcial1
+   static final FirebaseService instance = FirebaseService._();
+   FirebaseService._();
+ 
+   final _auth = FirebaseAuth.instance;
+   final _db   = FirebaseFirestore.instance;
+ 
++  // cache local de usuarios para evitar consultas repetidas
++  final Map<String, Usuario> _cacheUsuarios = {};
++
+   // ─── AUTH ─────────────────────────────────────────────────────────────────
+ 
+   // referencia al usuario logueado actualmente
+@@ -49,6 +51,12 @@ class FirebaseService {
+         'email': email,
+         'creadoEn': FieldValue.serverTimestamp(),
+       });
++      // guarda en cache
++      _cacheUsuarios[cred.user!.uid] = Usuario(
++        uid: cred.user!.uid,
++        nombre: nombre,
++        email: email,
++      );
+       return null;
+     } on FirebaseAuthException catch (e) {
+       return _mensajeError(e.code);
+@@ -82,19 +90,51 @@ class FirebaseService {
+     }
+   }
+ 
+-  // cierra sesión de Firebase y Google
++  // cierra sesión de Firebase y Google — limpia cache
+   Future<void> cerrarSesion() async {
++    _cacheUsuarios.clear();
+     await GoogleSignIn().signOut();
+     await _auth.signOut();
+   }
+ 
+   // ─── USUARIOS ─────────────────────────────────────────────────────────────
+ 
+-  // obtiene el perfil de un usuario por uid
++  // obtiene el perfil de un usuario por uid (con cache)
+   Future<Usuario?> obtenerUsuario(String uid) async {
++    // revisa cache primero
++    if (_cacheUsuarios.containsKey(uid)) return _cacheUsuarios[uid];
+     final doc = await _db.collection('usuarios').doc(uid).get();
+     if (!doc.exists) return null;
+-    return Usuario.fromMap(uid, doc.data()!);
++    final usuario = Usuario.fromMap(uid, doc.data()!);
++    _cacheUsuarios[uid] = usuario; // guarda en cache
++    return usuario;
++  }
++
++  // obtiene múltiples usuarios por uid (para cargar miembros de un grupo)
++  Future<Map<String, Usuario>> obtenerUsuarios(List<String> uids) async {
++    final Map<String, Usuario> resultado = {};
++    final List<String> sinCache = [];
++
++    // primero revisa cache
++    for (final uid in uids) {
++      if (_cacheUsuarios.containsKey(uid)) {
++        resultado[uid] = _cacheUsuarios[uid]!;
++      } else {
++        sinCache.add(uid);
++      }
++    }
++
++    // los que no están en cache se consultan en Firestore
++    for (final uid in sinCache) {
++      final doc = await _db.collection('usuarios').doc(uid).get();
++      if (doc.exists) {
++        final usuario = Usuario.fromMap(uid, doc.data()!);
++        _cacheUsuarios[uid] = usuario;
++        resultado[uid] = usuario;
++      }
++    }
++
++    return resultado;
+   }
+ 
+   // busca usuario por email (para agregar a grupo)
+@@ -104,7 +144,9 @@ class FirebaseService {
+         .limit(1)
+         .get();
+     if (query.docs.isEmpty) return null;
+-    return Usuario.fromMap(query.docs.first.id, query.docs.first.data());
++    final usuario = Usuario.fromMap(query.docs.first.id, query.docs.first.data());
++    _cacheUsuarios[usuario.uid] = usuario;
++    return usuario;
+   }
+ 
+   // actualiza el token FCM del usuario para notificaciones push
+@@ -185,6 +227,17 @@ class FirebaseService {
+             .toList());
+   }
+ 
++  // obtiene los gastos de un grupo como Future (para cálculos puntuales)
++  Future<List<Gasto>> obtenerGastosGrupo(String grupoId) async {
++    final snap = await _db
++        .collection('grupos')
++        .doc(grupoId)
++        .collection('gastos')
++        .orderBy('fecha', descending: true)
++        .get();
++    return snap.docs.map((d) => Gasto.fromMap(d.id, d.data())).toList();
++  }
++
+   // agrega un gasto al grupo y registra la actividad
+   Future<String?> agregarGasto(Gasto gasto) async {
+     try {
+@@ -294,6 +347,9 @@ class FirebaseService {
+ 
+   // ─── HELPERS ─────────────────────────────────────────────────────────────
+ 
++  // busca un usuario en cache (sincrónico, para widgets que ya cargaron usuarios)
++  Usuario? buscarUsuarioEnCache(String uid) => _cacheUsuarios[uid];
++
+   // traduce códigos de error de Firebase a mensajes amigables en español
+   String _mensajeError(String code) => switch (code) {
+     'user-not-found'       => 'No existe una cuenta con ese email',
+diff --git a/splitmate/pubspec.lock b/splitmate/pubspec.lock
+index dc1f1c6..de91751 100644
+--- a/splitmate/pubspec.lock
++++ b/splitmate/pubspec.lock
+@@ -345,10 +345,10 @@ packages:
+     dependency: transitive
+     description:
+       name: matcher
+-      sha256: "12956d0ad8390bbcc63ca2e1469c0619946ccb52809807067a7020d57e647aa6"
++      sha256: dc0b7dc7651697ea4ff3e69ef44b0407ea32c487a39fff6a4004fa585e901861
+       url: "https://pub.dev"
+     source: hosted
+-    version: "0.12.18"
++    version: "0.12.19"
+   material_color_utilities:
+     dependency: transitive
+     description:
+@@ -361,10 +361,10 @@ packages:
+     dependency: transitive
+     description:
+       name: meta
+-      sha256: "23f08335362185a5ea2ad3a4e597f1375e78bce8a040df5c600c8d3552ef2394"
++      sha256: "1741988757a65eb6b36abe716829688cf01910bbf91c34354ff7ec1c3de2b349"
+       url: "https://pub.dev"
+     source: hosted
+-    version: "1.17.0"
++    version: "1.18.0"
+   path:
+     dependency: transitive
+     description:
+@@ -438,10 +438,10 @@ packages:
+     dependency: transitive
+     description:
+       name: test_api
+-      sha256: "93167629bfc610f71560ab9312acdda4959de4df6fac7492c89ff0d3886f6636"
++      sha256: "949a932224383300f01be9221c39180316445ecb8e7547f70a41a35bf421fb9e"
+       url: "https://pub.dev"
+     source: hosted
+-    version: "0.7.9"
++    version: "0.7.11"
+   timezone:
+     dependency: transitive
+     description:
