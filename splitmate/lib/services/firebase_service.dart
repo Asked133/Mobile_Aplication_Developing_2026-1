@@ -3,6 +3,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_sign_in/google_sign_in.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import '../models/usuario.dart';
 import '../models/grupo.dart';
 import '../models/gasto.dart';
@@ -16,6 +17,13 @@ class FirebaseService {
 
   final _auth = FirebaseAuth.instance;
   final _db = FirebaseFirestore.instance;
+
+  // Instancia de GoogleSignIn con el Web Client ID para soporte en navegador
+  final GoogleSignIn _googleSignIn = GoogleSignIn(
+    clientId: kIsWeb
+        ? '495738642957-529jfac2o3t7aqidcp9dikl7drla7fjq.apps.googleusercontent.com'
+        : null,
+  );
 
   // caché local de usuarios para evitar lecturas repetitivas a Firestore
   final Map<String, Usuario> _usuariosCache = {};
@@ -70,7 +78,7 @@ class FirebaseService {
   // login con Google — crea perfil si es la primera vez
   Future<String?> loginGoogle() async {
     try {
-      final googleUser = await GoogleSignIn().signIn();
+      final googleUser = await _googleSignIn.signIn();
       if (googleUser == null) return 'Cancelado por el usuario';
       final gAuth = await googleUser.authentication;
       final cred = GoogleAuthProvider.credential(
@@ -96,7 +104,16 @@ class FirebaseService {
 
   // cierra sesión de Firebase y Google
   Future<void> cerrarSesion() async {
-    await GoogleSignIn().signOut();
+    try {
+      final isGoogle =
+          usuarioActual?.providerData.any(
+            (p) => p.providerId == 'google.com',
+          ) ??
+          false;
+      if (isGoogle) {
+        await _googleSignIn.signOut();
+      }
+    } catch (_) {}
     await _auth.signOut();
   }
 
